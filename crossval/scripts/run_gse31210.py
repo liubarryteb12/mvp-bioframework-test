@@ -189,8 +189,11 @@ def run():
     with open(os.path.join(OUT, "gse31210_results.json"), "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
-    # ⑥ 保存关键 figure（DE volcano + KM curve）
-    _save_figures(X, log2fc, sig, t_stat, n_t, n_n, times, events, groups, mean_auc, delta)
+    # ⑥ 保存关键 figure（DE volcano + KM curve）——失败不阻塞主流程
+    try:
+        _save_figures(X, log2fc, sig, t_stat, n_t, n_n, times, events, groups, mean_auc, delta)
+    except Exception as e:
+        print(f"[WARN] Figure save failed (non-fatal): {e}")
 
     print("\n=== Results ===")
     for k,v in results.items():
