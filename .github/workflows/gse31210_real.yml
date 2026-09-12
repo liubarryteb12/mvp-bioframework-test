@@ -24,7 +24,7 @@ jobs:
         run: |
           pip install --upgrade pip -q
           pip install -r crossval/requirements.txt
-          pip install pymupdf python-docx -q
+          pip install pymupdf python-docx pytest -q
           python -c "import pandas, numpy, scipy, sklearn, matplotlib, pypdf, fitz; print('deps OK')"
 
       - name: Create output dirs
@@ -52,7 +52,7 @@ jobs:
           python scripts/export_guard.py --selftest 2>&1 | tee ../out/11_export_stdout.txt
           echo "export rc=$?"
 
-          echo "=== T5: layout_check.py ==="
+          echo "=== T5: layout_check.py (with demo figures) ==="
           python scripts/layout_check.py --figdir figures/demo 2>&1 | tee ../out/02_layout_stdout.txt
           cp results/layout_report.json ../out/copy/layout_report.json 2>/dev/null || true
 
@@ -80,7 +80,8 @@ jobs:
           import json
           r = json.load(open('results/report.json'))
           s = r['summary']
-          print(f'判定项 {s['n_pass']}/{s['n_pass']+s['n_fail']+s.get('n_na',0)} PASS={s['n_pass']} FAIL={s['n_fail']} NA={s.get('n_na',0)}')
+          np_ = s['n_pass']; nf = s['n_fail']; na = s.get('n_na', 0)
+          print(f'判定项 {np_}/{np_+nf+na} PASS={np_} FAIL={nf} NA={na}')
           "
         env:
           PARENT_RUN_ID: ${{ github.run_id }}
