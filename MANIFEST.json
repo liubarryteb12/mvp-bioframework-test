@@ -1,7 +1,7 @@
 {
-  "version": "2.24",
-  "generated_at": "2026-09-12T15:15:08.091373+08:00",
-  "run_id": "7c537fba5517268c",
+  "version": "2.26",
+  "generated_at": "2026-09-12T20:35:36.871131+08:00",
+  "run_id": "0b7e75ffc4a5dbdc",
   "seed": 20260910,
   "verification": {
     "n_pass": 222,
@@ -12,56 +12,60 @@
     "mutation": "66/66"
   },
   "guards": {
-    "consistency_guard": "80/80",
+    "consistency_guard": "77/77",
     "report_guard": "10/10",
     "handoff_guard": "11/11"
   },
   "guards_source": "results/guard_results.json ← gen_appendix 从 stdout 解析",
   "naming_convention": "*_v{version}_{YYYYMMDD}.md",
   "files": {
-    "框架_独立审核包_v2.24_20260911.md": {
-      "sha256": "ce993a0c7c8569eb46960e9bdc71b030c9d7ddb4db8a571e38c4bf9785009cdf",
-      "bytes": 168560
+    "框架_独立审核包_v2.26_20260912.md": {
+      "sha256": "178af7c2a5f676563c6325a2a75393926e5fa8bc2ba01b87f635b5b1662546cb",
+      "bytes": 171067
     },
-    "四角度审核报告_合集_v2.24_20260911.md": {
-      "sha256": "8b5b22d2df87684adf0f9be8e3c0308c3ac3c30b60a95480e431c8bbbf952ef8",
-      "bytes": 46297
+    "四角度审核报告_合集_v2.26_20260912.md": {
+      "sha256": "cc693a6399038f3af51121463a62ea3ebfb6f6ab055981d089afa91f6a4248f1",
+      "bytes": 46386
     },
-    "附录_原始输出_v2.24_20260911.md": {
-      "sha256": "52b074d0fe0e3318d576b0758f96d06d359ff940146e8dd854bc4ea567a9e1a9",
-      "bytes": 168661
+    "附录_原始输出_v2.26_20260912.md": {
+      "sha256": "247197f6890f8c985079c09a58845d7aa93e5685e86d4e7d68fb108768064bee",
+      "bytes": 180215
     },
     "作图规范_v1.0.md": {
       "sha256": "c33ea773e2a04ede690f51857e9e458c718cb6ee5067464e18b0929e35531356",
       "bytes": 13182
     },
     "跨平台执行指导.md": {
-      "sha256": "ad9333346709eb410f939a461b5c0eacc1daa7db085f598ba66c5134b4233202",
-      "bytes": 9551
+      "sha256": "eaa148e7a3ee22aa3682b2d7254fc74618e9ada0b5bb1852202683b3cdcb7aca",
+      "bytes": 12759
     },
     "交付规则.md": {
       "sha256": "7360b0f5d70330bdb774062c3d5e9a0a63a3cb492df3d46261a4c53db36ccbef",
       "bytes": 8079
     },
     "上机总纲_判读与经验.md": {
-      "sha256": "d547eac9b77a4d8121e45ac6afc94be839eb5234e1e78735f3b19d0716083904",
-      "bytes": 9499
+      "sha256": "7b45cdf811f4cff9b85e866deaf2be3573949d8af06d0db949c5f8c713b6c6db",
+      "bytes": 10063
     },
     "写作流程规范_v1.0.md": {
-      "sha256": "ffdde9c7d88cddb1942fe07790a57f9571c2bedf1052efce44355b4054e18f3f",
-      "bytes": 7855
+      "sha256": "895ffbf8430ac85c4d7b08c7db5b9be51e768062f6f1f158797e0d0c8d7b0b97",
+      "bytes": 8585
     },
     "MVP真实数据验证_结构化提示词_v1.0.md": {
       "sha256": "ca7a2ba12d3c0c4d39d81b1b84f4add2e87a5c530db0aa156392bc013a4ccb91",
       "bytes": 12187
     },
+    "云端服务器执行提示词_v1.0.md": {
+      "sha256": "e27000c460d4c2121aaf21d044c5f928e6ce2e96f3bec010e7a64117b3104b6e",
+      "bytes": 27121
+    },
     "build.py": {
-      "sha256": "84db496b71d5b1c76790b13d4837eaa3d0ccf602880ad7d5afb466cb29ea08a1",
-      "bytes": 62433
+      "sha256": "0cd64815f0726c2cc6b08a2bc3bf6aee14003470549be83bd48ebfdedc567be7",
+      "bytes": 91611
     },
     "merge_delivery.py": {
-      "sha256": "6303f9ca0d24b992db340050e582ffeab2fae0b12b3a68c78f4f266890c43b96",
-      "bytes": 8554
+      "sha256": "4d3749f599f18ceb5067e6c307b310a38d1c50a465d3db8b4fdf6ff7aae5b5fa",
+      "bytes": 10450
     }
   },
   "v21_fixes": [
@@ -393,5 +397,152 @@
     "  layout_check 的 C-6 尊重 --figdir(否则「我的图都通过」是假象);",
     "  跨平台指导开头加「解压后目录结构」;报告二 §0.1/§0.2 内部矛盾已更新;",
     "  requirements.txt 归属明确;所有相对路径强调 cwd=crossval/"
+  ],
+  "v225_fixes": [
+    "★★ 本轮由**独立审查**驱动（审查方在交付包上原样复现全部命令后提交报告）",
+    "★ P0-1 交付包「自证装置」全线失效 —— 根因：未版本化文件名硬编码",
+    "  实证：consistency_guard 63/69(6 FAIL)、report_guard 9/10、guard_selftest 崩溃(0/66)",
+    "  而随包台账与附录却记 80/80 / 10/10 / 66/66 —— 开发机全绿、交付包全红",
+    "  · 6 处回退路径（consistency_guard:399/539/551/562、report_guard:280、",
+    "    guard_selftest:101/105/119）原硬编码未版本化旧名，而 zip 内只有版本化副本",
+    "  · 讽刺点：consistency_guard 的 docstring 早已写「旧名，zip 内不存在」，",
+    "    却只修了 argparse 的 default —— 「改了 A 忘改 B」第 N 次复发",
+    "  修：新增统一解析器 main_doc() / latest_versioned()（显式 > 最新版本化 >",
+    "  源文档 > SystemExit），禁止降级为「跳过检查」",
+    "★ P0-2 ZIP_CONTENTS.md 缺失 → 云端 CP-2 第一步死锁",
+    "  v24_fixes 声称「已新增 ZIP_CONTENTS.md + ZIP_CONTENTS.json」，但 build.py",
+    "  **没有这一步**（STAGES 到 13 结束）—— 「声称改了 vs 实际改了」不符",
+    "  修：新增 STAGES 12.5 由代码生成，并与 _step_zip 共用 _ship_list() 单一来源",
+    "★ P0-3 G-12 拿「每次必变」的 run_id 当一致性锚（设计层自相矛盾）",
+    "  框架 §5 自己声明「run_id 每次运行必然不同」，而 G-12 判 doc banner == report.json",
+    "  → 任何人重跑 verify_all（T4 就要求这么做）后 4 项必然 FAIL，与平台无关",
+    "  修：跨制品锚改用 input_hash（sha256(SEED|len(D1)|len(D3))，稳定）；",
+    "  run_id 只查文档内部自洽；banner/§0.2 同步登记 input_hash（由 build 代码保证）",
+    "★ P0-4 附录「原始输出」不可复现 → 新增 build 后置校验 P-8",
+    "  在**打包后的交付布局**里重跑三道守卫 + 变异测试，全绿才算构建成功；",
+    "  P-1~P-7 只盯开发机现场，一条都没抓到 —— 这正是本框架设计跨平台验证要找的东西",
+    "★ P0-5 中文 Windows(cp936) 下 verify_all.py 崩溃（非「字体差异」，是崩溃）",
+    "  实证：已输出 8294 行、在最接近终点的分支 8C 抛 UnicodeEncodeError(I²)，",
+    "  exit 3、report.json 未落盘、整轮证据作废；两份执行指导均未给规避手段",
+    "  修：9 个脚本内建编码加固（重定向→强制 UTF-8；控制台→替换不可编码字符）；",
+    "  5 处 subprocess 调用统一 UTF-8 同口径解码；跨平台指导 §3.1 增设 $env:PYTHONUTF8",
+    "★ P1-1 写作层基线三处不一致，且「不给输入 = 自动通过」",
+    "  · build 从不传 --p1 → 3 项判 N/A；--skill 恒缺 → WP-3.1 永久 N/A（N/A 不是失败）",
+    "  · 实测：不传 --p1 得 38 通过 + 4 N/A，而汇总写「38/38 通过」（缺口不可见）",
+    "  修：build 传真实 P1（从稿件派生，不硬编码）+ 新增 demo skill 夹具；",
+    "  WP-3.1 硬化（未提供 --skill → FAIL）；汇总分母改为三态之和",
+    "★ P1-2 新增 G-3.uniq：同一语境取值必须唯一（先红后绿已验证）",
+    "  实证漏检：MoCA 队列 OR 在 §3 H-5 写 **2.741**、在 §7.2 与附录写 **3.085**",
+    "  （实跑值 3.085）—— G-3 只查「数字能否定位」，两个矛盾值双双 PASS",
+    "  已修 H-5 的 2.741/1.195 → 3.085/1.238",
+    "★ P1-3 G-13 自相矛盾修复：原要求「至少命中 1 处硬编码」→ 修干净反而 FAIL",
+    "  （等于强迫代码保留违规）改为 G-13.pat（合成样本自证模式有效）+",
+    "  G-13.clean（真实源码未受保护硬编码数必须为 0）",
+    "★ P1-4 G-2.2/G-4.2 用 len(checks) 猜排版通过数 → 产生假 FAIL",
+    "  修：layout_check.py 显式登记 n_pass/n_fail/n_total，消费方不再猜",
+    "★ P1-5 包内混入过期文档与未登记文件",
+    "  · Win11_Agent_测试指令.md（v2.3 时代，101 项/15 分支）移入 _archive_过期副本/",
+    "  · 乱码名条目 Σ║æτ£…（UTF-8 字节被按 GBK 解读）为**旧版 530 行**，",
+    "    与现行 587 行并存 = 同一指令两个真相 → 一并归档",
+    "  · MANIFEST.files 补登 云端服务器执行提示词；_ship_list 单一来源覆盖全部交付文件",
+    "★ P1-6 build.py / merge_delivery.py 自身不可移植：",
+    "  WS 硬编码「/data/workspace」、STAGE 硬编码「/tmp/」—— 与",
+    "  「build.py 是平台无关的，Win/Linux 通用」直接矛盾",
+    "  实测：Windows 上构建第 12 步报「[merge] 缺少源文件: MANIFEST.json」",
+    "  修：WS 由 __file__ 派生（可由 CROSSVAL_WS 覆盖）+ STAGE 用 tempfile",
+    "★ P1-7 云端提示词依赖清单缺 pyyaml / pytest（T6/T7/T9 会 ImportError → G3 STOP）",
+    "★ 新增一致性守卫第三态：_na() 登记 + 汇总行给出 不适用 N 项",
+    "  起因：v2.24 里 G-10/G-11 整块异常被 except 吞掉，判定项 80→69 静默消失，",
+    "  汇总照写「63/69 通过」—— 第 11 条陷阱形态③发生在本守卫自己身上",
+    "★ P0-6 merge_delivery.py 在 Windows 写出 CRLF → 合并自检 9/9 误报未收录",
+    "  文本模式写文件把 LF 翻成 CRLF，而自检用源文件的 LF 文本做子串比对",
+    "  → 构建第 20 步「合并交付」直接失败，且 §1 MANIFEST 回读正则同样失配。",
+    "  Linux 不做该转换，故开发机从未暴露 —— 又一个「只在一侧平台成立」的缺陷。",
+    "  修：显式指定 LF 换行 + 自检前归一化 CRLF；",
+    "  并同步给 版本化副本 / MANIFEST / ZIP_CONTENTS / 附录 的写入点加 LF，",
+    "  使 Win/Linux 产出的字节一致（MANIFEST 登记的 sha256 才跨平台可比）",
+    "★ 本轮变更清单的**唯一存放处**是 MANIFEST.json 的 v225_fixes 字段",
+    "  （由 build.py 写入，不再复制进附录 —— 两处各存一份必然不同步，",
+    "   这正是本框架栽过多次的『同一事物两个真相』）"
+  ],
+  "v226_fixes": [
+    "★★ 本轮为**上机前优化轮**：只修\"会在云端跑不通 / 会误导执行方\"的缺陷，**51 条判据、9 条硬阻断、全部阈值一字未动**（延续 v2.25 的边界）。",
+    "",
+    "★ A1【硬缺陷·本轮最重要】guard_selftest 硬编码 `python3` 启动子守卫",
+    "  实证：Windows 的 venv **不生成 python3.exe**（只有 python.exe/pythonw.exe），",
+    "  故在 Win11 + venv（本框架自己推荐的执行方式）下，`python3` 落到 PATH 上",
+    "  另一个**没装依赖**的解释器 → 子进程 ImportError → 输出里一个判定行都没有",
+    "  → **_line_is_fail() 恒 False** → **18 个守卫家族被报成「空规」**、",
+    "  家族覆盖率 85%、退出码 1。实测先红：36/66。",
+    "  · 这是第 11 条陷阱的**镜像形态**：把**环境故障**误报成**规则失效**，",
+    "    会把审核方引去查根本不存在的空规，比漏报更坏。",
+    "  修：① 7 处 `python3` → `sys.executable`（父子同解释器，平台无关）；",
+    "      ② run_guard 检测\"子进程未产出任何 [PASS]/[FAIL]\"→ 显式标注环境错误；",
+    "      ③ 退出码扩为三态：0 全绿 / 1 真空规 / **2 环境错误（本次结果无效）**；",
+    "      ④ mutation_results.json 增 env_error / env_error_count 字段。",
+    "  先红后绿：36/66·85% → **66/66·100%**（见 验收证据_优化轮/）",
+    "",
+    "★ A2 `crossval/requirements.txt` 缺 pyyaml / pytest（第三次复发）",
+    "  按该文件 `pip install -r` 后，ablation(T6)/guard_selftest(T7)/",
+    "  consistency_guard/layout_check/writing_guard(T8)/pytest(T9) 全部 ImportError",
+    "  → 连续失败 → 网关 G3 STOP。",
+    "  · 与审查报告 P1-5/P1-7 **同一缺口的第三次复发**：前两次只改了执行指导；",
+    "    v2.25 声称\"已补 pyyaml/pytest\"，**实际只改了文档、没改本文件**。",
+    "  修：补 pyyaml==6.0.3 / pytest==9.1.1；并把版本口径统一为**跑出基线的那一套**",
+    "  （原三处互不相同：本文件 `>=`、执行指导 `==2.2.6` 一套、实跑 2.5.0 一套）。",
+    "  两份执行指导的 pip 行改为 `pip install -r requirements.txt` —— 依赖清单**只有一处**。",
+    "",
+    "★ A3 verify_all.py 的 Markdown 汇总行硬编码分母 → report.md 写「覆盖 21/8 分支」",
+    "  控制台那行 v2.18 已改动态，Markdown 这一行漏改（改 A 忘 B）。",
+    "  report.md 随包交付，云端执行方会直接读到这个不可能的分式。",
+    "  修：`{nb}/8` → `覆盖分支 {nb} 个`，与控制台同口径。",
+    "",
+    "★ A4 crossval/ 下残留**同名不同内容**的指令副本 → 同一指令两个真相",
+    "  `crossval/云端服务器执行提示词_v1.0.md`（第二代 587 行 / 21652 B）与根目录现行版",
+    "  （645 行 / 24863 B）**被打进同一个 zip**（ZIP_CONTENTS 第 86 与第 92 项），",
+    "  执行方 cd crossval 第一眼看到的就是旧那份。",
+    "  · v2.25 P1-5 只归档了乱码旧版（530 行），漏了这一份 ——",
+    "    因为 G-14 的 _ME 前缀表当时只有 3 个前缀 + 1 个已废文档名。",
+    "  修：移入 _archive_过期副本/ 并做**三代版本对照表**；",
+    "  G-14 的 _ME 扩为**全部交付文档名**（枚举式白名单必然漏，一次补齐）。",
+    "",
+    "★ B1 crossval/README.md 是包内**最容易被第一眼读到**却最不准的文档",
+    "  数字停在 v1.x（33/33、8 个分支、10/8），且\"包内容\"一节说 scripts/ 只有",
+    "  verify_all.py —— 实际 **24 个脚本**。此前的处置是让执行方\"忽略它\"。",
+    "  修：整篇重写为现行口径（222/222 · 21 分支 · 66/66 · 70/70 · 24 脚本），",
+    "  并声明\"本文件不自行维护数字，权威值见 MANIFEST.json\"。",
+    "",
+    "★ B2/B3 两份执行指导同步：删掉\"README 数字过时、忽略\"的批注（README 已修对）；",
+    "  依赖安装行改为指向 requirements.txt；CP-7 / §7 增设 guard_selftest 三态退出码说明。",
+    "",
+    "★ B4 INVARIANTS.md 的**无法验证的声明**：原文写\"由 criteria.yaml 派生、",
+    "  **不由人工维护**\"，而 build.py / gen_appendix.py 里都没有这一步生成。",
+    "  改为如实描述（人工维护，须与 criteria.yaml 对齐），并写明恢复自动派生的前提。",
+    "",
+    "★ C1 新增功能单元执行器 scripts/run_units.py（用户 2026-09-12 提出）",
+    "  需求原话：\"分成功能单元，一块一块的，一块完整运行 ok 无错后进入下一功能单元\"",
+    "  修：把验证拆成 **10 个功能单元**，每个单元 ① 独立入口 ② 独立判定（gate）",
+    "      ③ 独立产物；**前一个 gate 不过 → 立即停下，不进入下一个**。",
+    "  · 单元顺序与 build.py 的 STAGES 同源：环境→主验证→排版→写作→导出→",
+    "    handoff→pytest→跨文档一致性→变异(守卫自证)→判据消融",
+    "  · gate **只读台账**（report.json / layout_report.json / writing_report.json /",
+    "    export_report.json / mutation_results.json），不靠人眼看末行文字；",
+    "    读不到或字段不全 → 判未通过，不静默放过",
+    "  · U9 复用 v2.26 的三态退出码：rc==2 → 判「环境错误」并显式提示",
+    "    「不要当空规上报」（与 A1 的教训闭环）",
+    "  · 文档路径用 latest_versioned() 取最新版本化副本，不写死版本号",
+    "  · 支持 --list / --only U3 / --from U5 / --keep-going；落盘 results/units_report.json",
+    "  · 定位：build.py 管**构建交付物**，run_units.py 管**上机跑验证**；",
+    "    二者顺序同源但用途不同，互不替代",
+    "  实测：本机 10/10 单元 gate 全绿，退出码 0（验收证据_优化轮/UNITS_run1.txt）",
+    "",
+    "边界（明确**没有**做）：",
+    "  · 未改任何判据、阈值、措辞规则；",
+    "  · 未新增生信判据（审查 §6.3 的五条建议仍留给领域专家定阈值）；",
+    "  · 未接真实数据（GSE31210 仍在 生信test/）。",
+    "  · **未做物理目录重组**：scripts/ 仍是平铺 25 个 .py，根目录仍是平铺交付文档。",
+    "    原因：build.py / consistency_guard / gen_appendix / 框架正文内嵌脚本 都按",
+    "    现有路径锚定，挪文件会让「自证装置」整体失效，收益小于风险。若要重组，",
+    "    须先改 build.py 的路径常量 + 三道守卫 + 内嵌同步，作为一个独立轮次来做。"
   ]
 }

@@ -16,13 +16,49 @@ guard_selftest.py —— 守卫有效性变异测试(mutation testing)
     抓不到 = 空规(规则没跑到过应触发的输入)。
 
 运行: python scripts/guard_selftest.py
-退出码: 0 = 所有守卫均能抓到注入的违规; 1 = 存在空规
+退出码: 0 = 所有守卫均能抓到注入的违规
+        1 = 存在空规（且子进程都正常跑起来了）
+        2 = **环境错误** —— 子守卫没跑起来，本次结果无效（v2.26 新增）
+
+★ v2.26 平台修正：
+    子守卫原先以硬编码 `python3` 启动。Windows 的 venv **不生成 python3.exe**
+    （只有 python.exe / pythonw.exe），故在 Win11 + venv（即本框架自己推荐的
+    执行方式）下，`python3` 会落到 PATH 上另一个**没装依赖**的解释器
+    → 子进程 ImportError → 无任何判定行 → 18 个守卫家族被误报为「空规」。
+    现改用 sys.executable，保证父子同解释器；并把「环境错误」单列为退出码 2。
 """
 import os, re, sys, json, shutil, tempfile, subprocess
+# ── 控制台编码加固（v2.25）──────────────────────────────────────────────────
+# 起因：中文 Windows 默认控制台 cp936(GBK) 无法编码 ⚠ → UnicodeEncodeError。
+try:
+    if sys.stdout.isatty():
+        sys.stdout.reconfigure(errors="replace")
+    else:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(errors="replace")
+except (AttributeError, ValueError):
+    pass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 WS = os.path.dirname(ROOT)
+
+# ★ v2.26:子守卫必须用**当前解释器**启动，不得硬编码 python3。
+#   实证：Windows venv 只生成 python.exe / pythonw.exe，**没有 python3.exe**
+#   → `python3 scripts/xxx_guard.py` 会落到 PATH 上另一个没装依赖的解释器
+#   → 子进程 ImportError → 无判定行 → 被误判为「空规」。
+#   用 sys.executable 保证「跑变异测试的解释器」== 「跑子守卫的解释器」，
+#   依赖必然可用，且 Win/Linux/macOS 一致。
+PYEXE = '"%s"' % sys.executable
+
+# 判定行形态：子守卫每项输出的 [PASS] / [FAIL]
+_RE_JUDGE_LINE = re.compile(r"\[(PASS|FAIL)\]")
+
+# 子进程异常标记（用于把"环境错误"与"空规"分开，见 run_guard）
+ENV_ERR_MARK = "[guard_selftest·环境错误]"
+
+# 本次运行中「子进程未产出判定行」的用例名
+_ENV_BROKEN = set()
 
 ROWS = []
 
@@ -47,11 +83,38 @@ def _line_is_fail(out, eid):
     return False
 
 
+def _child_env():
+    """★ v2.25：子守卫改为「被重定向即输出 UTF-8」，父进程须同口径解码，
+    否则中文判定行在中文 Windows(cp936) 上会乱码或抛 UnicodeDecodeError。"""
+    e = dict(os.environ)
+    e["PYTHONUTF8"] = "1"
+    e["PYTHONIOENCODING"] = "utf-8"
+    return e
+
+
 def run_guard(cmd, cwd=None):
-    """返回 (exit_code, stdout)"""
+    """返回 (exit_code, stdout)
+
+    ★ v2.26：必须区分「子守卫抓到违规」与「子守卫根本没跑起来」。
+      实证（成交付方复现）：Windows venv 里**不存在 python3.exe**（只有 python.exe），
+      而本函数原先硬编码 `python3 ...` → 落到 PATH 上另一个**没装依赖**的解释器
+      → ImportError → 子进程输出里一个 [PASS]/[FAIL] 都没有
+      → _line_is_fail() 恒 False → 18 个守卫家族被报成「空规」。
+      这是**第 11 条陷阱的镜像形态**：守卫没跑，却被判为"规则没生效"，
+      会把审核方引去查根本不存在的空规。故此处显式标注环境错误。
+
+      修法二合一：① 解释器改用 sys.executable（与父进程同一环境，平台无关）；
+      ② 子进程输出中若无任何判定行，追加显式标记，由调用方按「环境错误」处理。
+    """
     p = subprocess.run(cmd, shell=True, cwd=cwd or ROOT,
-                       capture_output=True, text=True)
-    return p.returncode, p.stdout + p.stderr
+                       capture_output=True, encoding="utf-8",
+                       errors="replace", env=_child_env())
+    out = p.stdout + p.stderr
+    if not _RE_JUDGE_LINE.search(out):
+        out += ("\n" + ENV_ERR_MARK + " 子进程未产出任何 [PASS]/[FAIL] 行 —— "
+                "这不是「空规」，而是子守卫根本没跑起来"
+                "（解释器 / 依赖 / 路径错误）。\n")
+    return p.returncode, out
 
 
 def mutated_fs(figdir, bad_name):
@@ -98,11 +161,30 @@ def main():
     print("  守卫有效性变异测试 —— 注入已知违规,验证守卫抓得到")
     print("=" * 78)
 
-    FRAME = os.path.join(WS, "框架_独立审核包_v1.md")
+    # ★ v2.25 P0：原为硬编码未版本化旧名（**交付 zip 内不存在**）→
+    #   第一个用到 FRAME 的变异用例直接 FileNotFoundError 崩溃，实测 0/66。
+    #   改为：未版本化源文档（开发机）→ 最新版本化副本（交付布局）。
+    #   找不到时 **SystemExit**，不"跳过"—— 跳过即空规（第 11 条陷阱形态①）。
+    def _pick(plain, prefix):
+        if os.path.isfile(plain):
+            return plain
+        import glob as _g, re as _re
+        hits = [p for p in _g.glob(os.path.join(WS, prefix + "_v*.md"))
+                if _re.search(r"_v[\d.]+_\d{8}\.md$", os.path.basename(p))]
+        if not hits:
+            raise SystemExit(
+                "[guard_selftest] 找不到主交付文档「%s」：既无未版本化源文档，"
+                "也无版本化副本 —— 变异测试不能在缺失对象上「跳过」。" % prefix)
+        def _k(p):
+            m = _re.search(r"_v([\d.]+)_(\d{8})\.md$", os.path.basename(p))
+            return tuple(int(x) for x in m.group(1).split(".")) + (int(m.group(2)),)
+        return max(hits, key=_k)
+
+    FRAME = _pick(os.path.join(WS, "框架_独立审核包_v1.md"), "框架_独立审核包")
 
     MANU = os.path.join(ROOT, "demo", "manuscript_demo.md")
     P1 = "损伤处理 3 小时后叶片小 RNA 表达谱发生显著改变。"
-    REPORT = os.path.join(WS, "四角度审核报告_合集.md")
+    REPORT = _pick(os.path.join(WS, "四角度审核报告_合集.md"), "四角度审核报告_合集")
 
     # ⚠ v2.4 修:锚点原为硬编码字符串(如 "主验证:85/85 通过")。
     #   文档数字一同步(85→101),锚点立即失效 → 报"无法测试" → 假空规。
@@ -116,7 +198,7 @@ def main():
     print(f"  (锚点动态取自 report.json: {_NP}/{_NT} · {_NB} 分支)")
     # v2.7 新增锚点:G-11 / G-12 的动态来源(同样禁止硬编码,
     # 否则文档一同步锚点就失效 —— 见上方 v2.4 教训)
-    APPENDIX = os.path.join(WS, "附录_原始输出.md")
+    APPENDIX = _pick(os.path.join(WS, "附录_原始输出.md"), "附录_原始输出")
     # G-12 检查的是**版本化副本**(G-12 内部用 sorted(_cands)[-1]),
     # 因此变异必须注入到副本上 —— 注入源文档会因锚点(v2.5)不匹配而
     # 报"无法测试",那不是空规,是测错了对象。
@@ -139,7 +221,14 @@ def main():
         if os.path.exists(_bvp) else \
         json.load(open(os.path.join(WS, "MANIFEST.json"),
                        encoding="utf-8"))["version"]
-    _RID = _R["run_metadata"]["run_id"]
+    # ★★ v2.25：run_id 锚点必须取自 build_version.json，**不能**取 report.json。
+    #   起因（交付布局实测）：用户在云端按 T4 先跑一次 verify_all，report.json 的
+    #   run_id 随之改变，而文档 banner 保持构建时的值 → 变异用例的锚点
+    #   「run_id `<值>`」在文档里找不到 → 报"锚点缺失(无法测试)"→ 2 个用例 FAIL
+    #   （实测 64/66，而开发布局是 66/66）。与 G-12 是同一族"拿易变量当基准"。
+    #   build_version.json 只在构建时写，重跑主验证不动它 —— 锚点因此稳定。
+    _RID = json.load(open(_bvp, encoding="utf-8"))["run_id"] \
+        if os.path.exists(_bvp) else _R["run_metadata"]["run_id"]
     print(f"  (G-11/G-12 锚点: 判据 {_NY} 条 · 版本 v{_VER} · run_id {_RID[:16]}…)")
 
     # ── ★ v2.8:新增守卫必须同时提交变异用例(采纳审计建议,做成代码强制) ──
@@ -347,21 +436,29 @@ def main():
                 _cli += f' --src "{d}"'
             if expect_id.startswith("R-"):
                 rc, out = run_guard(
-                    f'python3 scripts/report_guard.py {_cli}')
+                    f'{PYEXE} scripts/report_guard.py {_cli}')
             elif expect_id.startswith("WP-"):
                 rc, out = run_guard(
-                    f'python3 scripts/writing_guard.py {_cli} --p1 "{P1}"')
+                    f'{PYEXE} scripts/writing_guard.py {_cli} --p1 "{P1}"')
             else:
                 rc, out = run_guard(
-                    f'python3 scripts/consistency_guard.py {_cli}')
+                    f'{PYEXE} scripts/consistency_guard.py {_cli}')
             # ⚠ v2.11 修**判定伪绿**:原为 `expect_id in out and "FAIL" in out`
             #   —— 只要输出里同时出现该 ID 和 "FAIL" 字样即算抓到,
             #   但 FAIL 可能属于**别的检查**。例:G-4.2 用例改 70/70→99/99
             #   会同时触发 G-2.2;若 G-4.2 自身 PASS,原判定仍报"抓到"。
             #   正解:定位 expect_id 所在行,判断该行本身是否 FAIL。
             hit = _line_is_fail(out, expect_id)
-            add(name, f"注入违规后应触发 {expect_id}",
-                hit, f"rc={rc} {'抓到' if hit else '未抓到(空规!)'}")
+            # ★ v2.26：区分「空规」与「子进程没跑起来」。
+            #   若不区分，解释器/依赖错误会被报成"18 个守卫是空规"——
+            #   这是第 11 条陷阱的镜像：把**环境故障**诬告成**规则失效**。
+            _broken = ENV_ERR_MARK in out
+            if _broken and not hit:
+                _ENV_BROKEN.add(name)
+            add(name, f"注入违规后应触发 {expect_id}", hit,
+                f"rc={rc} " + ("抓到" if hit else
+                               ("子进程异常(非空规)" if _broken
+                                else "未抓到(空规!)")))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -380,7 +477,7 @@ def main():
         os.makedirs(tmp, exist_ok=True)
         _f = os.path.join(tmp, "wp9_%s.json" % ("good" if not _exp else "bad"))
         json.dump(_d, open(_f, "w", encoding="utf-8"), ensure_ascii=False)
-        _rc, _out = run_guard(f'python3 scripts/export_guard.py --src "{_f}"')
+        _rc, _out = run_guard(f'{PYEXE} scripts/export_guard.py --src "{_f}"')
         _fail = "FAIL" in _out
         add("WP-9 三格式(%s)" % _tag,
             "应报 FAIL" if _exp else "应全 PASS",
@@ -395,7 +492,7 @@ def main():
     if _fs_path:
         try:
             rc, out = run_guard(
-                f'python3 scripts/consistency_guard.py --doc "{FRAME}"')
+                f'{PYEXE} scripts/consistency_guard.py --doc "{FRAME}"')
             hit = "G-7.2" in out and "FAIL" in out
             add("G-7 图命名(fs变异)", "注入违规图名后应触发 G-7.2",
                 hit, f"rc={rc} {'抓到' if hit else '未抓到(空规!)'}")
@@ -424,7 +521,7 @@ def main():
         _made = True
     try:
         rc, out = run_guard(
-            f'python3 scripts/consistency_guard.py --doc "{FRAME}"')
+            f'{PYEXE} scripts/consistency_guard.py --doc "{FRAME}"')
         _h14 = _line_is_fail(out, "G-14.1")
         add("G-14 过期副本", "放置过期副本后应触发 G-14.1",
             _h14, f"rc={rc} {'抓到' if _h14 else '未抓到(空规!)'}")
@@ -449,7 +546,7 @@ def main():
         with open(_src, "a", encoding="utf-8") as _f:
             _f.write('\n_x13_probe = os.path.join(WS, "框架_独立审核包_v1.md")\n')
         rc, out = run_guard(
-            f'python3 scripts/consistency_guard.py --doc "{FRAME}"')
+            f'{PYEXE} scripts/consistency_guard.py --doc "{FRAME}"')
         _h13 = _line_is_fail(out, "G-13.")
         add("G-13 硬编码主文档", "源码注入硬编码后应触发 G-13.*",
             _h13, f"rc={rc} {'抓到' if _h13 else '未抓到(空规!)'}")
@@ -745,6 +842,10 @@ def main():
                    "caught": bool(_r.get("caught"))}
                   for _r in getattr(main, "_ROWS", [])] if hasattr(main, "_ROWS") else []
         json.dump({"n_pass": k, "total": n,
+                   # ★ v2.26：环境错误单列。空规与环境错误是**不同的事**，
+                   #   合并计数会让"18 个守卫是空规"这种诬告进入台账。
+                   "env_error": sorted(_ENV_BROKEN),
+                   "env_error_count": len(_ENV_BROKEN),
                    "families": sorted(allfam), "covered": sorted(covered),
                    # ★ v2.19 修:原用 len(covered)/len(allfam) —— 未取交集。
                    #   covered 含 T26-T30/WP-* 等**不在 allfam 内**的家族
@@ -759,6 +860,16 @@ def main():
                   open(_mp, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
     except Exception:
         pass
+    # ★ v2.26：环境错误必须与"空规"分开报，且**优先**。
+    #   若子进程根本没跑起来却报"存在空规"，审核方会去查 18 条并不存在的空规；
+    #   而真实原因（解释器/依赖）反被掩盖 —— 这正是本框架最反对的"汇总撒谎"。
+    if _ENV_BROKEN:
+        print(f"\n  ✗ 环境错误：{len(_ENV_BROKEN)} 个用例的子进程未产出任何判定行")
+        print("    这不是「空规」。真实原因是子守卫没跑起来（解释器/依赖/路径）。")
+        print("    已发生的用例（前 6 个）：" + "、".join(sorted(_ENV_BROKEN)[:6]))
+        print("    请先确认：`python -c \"import yaml,numpy\"` 在你**当前**解释器下成功。")
+        print("=" * 78)
+        return 2
     if k < n:
         print("  ⚠ 存在空规 —— 该守卫从未证明过自己能抓到违规")
     print("=" * 78)

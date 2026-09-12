@@ -97,8 +97,13 @@ class Ledger:
         p = sum(1 for r in self.rows if r.get("passed") is True)
         f = sum(1 for r in self.rows if r.get("passed") is False)
         n = sum(1 for r in self.rows if r.get("passed") is None)
+        # ★ v2.25：分母由 p+f 改为 p+f+n。
+        #   原写法在 4 项 N/A 时输出 "38/38 通过" —— 读起来像"全部通过"，
+        #   而实际有 4 项**从未执行**。与 verify_all 的口径（总数为三态之和）
+        #   不一致，也正是框架批判的"汇总掩盖原始输出"。
+        #   改后同一情形显示 "38/42 通过, 失败 0, 不适用 4" —— 缺口自明。
         print("\n  写作守卫: %d/%d 通过, 失败 %d, 不适用 %d"
-              % (p, p + f, f, n))
+              % (p, p + f + n, f, n))
         return p, f, n
 
 
@@ -192,10 +197,23 @@ def wp_3(L, sects, spec, skill_result=None):
         L.na("WP-3", "背景检查", "稿件无引言节")
         return
     s = spec["background"]
+    # ★★ v2.25 硬化 WP-3.1（P1 修复）
+    #   原实现：skill_result is None → 判 **N/A**，备注写"若实际未调用则本项应为 FAIL"。
+    #   问题：代码无法区分「调用了但返 0 篇」与「压根没调用」，两者都走 N/A，
+    #   而 **N/A 不是失败** → 一个从不调用检索 skill 的执行方永久拿 N/A。
+    #   这正是框架自己批判的"不提供输入 → 检查自动通过"（云端提示词 §T10 表格里
+    #   那个"传空 → 38/38 通过 → 根本没检查"的例子）。
+    #   改为三分：
+    #     · 未提供 --skill  → FAIL（该检查**无法执行** = 配置缺失，不是"不适用"）
+    #     · 提供且 n_found>0 → PASS，并执行 WP-3.2 幻觉文献检查
+    #     · 提供但 n_found==0 → WP-3.1 PASS、WP-3.2 判 N/A（真的检索了，确实没有）
     if skill_result is None:
-        L.na("WP-3.1", "文献来自 research_survey_skill",
-             "未提供 skill 输出;若实际未调用则本项应为 FAIL")
+        L.add("WP-3.1", "文献来自 research_survey_skill", "未提供 --skill", "已提供", False)
     else:
+        _np = len(skill_result.get("papers", []))
+        L.add("WP-3.1", "文献来自 research_survey_skill",
+              "n_found=%s · %d 篇" % (skill_result.get("n_found"), _np),
+              "已提供且可核验", True)
         cited = set(re.findall(r"\[(\d+)\]", bg))
         have = {str(p.get("id")) for p in skill_result.get("papers", [])}
         ghost = sorted(cited - have)
