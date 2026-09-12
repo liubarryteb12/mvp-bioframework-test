@@ -59,7 +59,7 @@ Kaplan-Meier log-rank检验；5折CV AUC（复发预测）；与临床分期基�
 ## 3. Results
 
 ### 3.1 差异表达谱
-共检出{n_sig}个显著差异探针（上调{nup}，下调{ndn}），FDR<0.05。
+|共检出{nsig}个显著差异探针（上调{nup}，下调{ndn}），FDR<0.05。
 
 ### 3.2 生存分层
 Risk score在中位数分层后，高vs低危组Kaplan-Meier log-rank检验：χ²={chi2:.1f}，P={sp:.2e}（n={sn}），HR≈{hr:.2f}。
