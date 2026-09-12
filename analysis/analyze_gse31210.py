@@ -158,8 +158,10 @@ deg_tab.to_csv(os.path.join(RES, "T02_差异表达全表.csv"), index=False, enc
 print("=" * 70, "\nU03b GO/KEGG 富集（gseapy/Enrichr）", sep="")
 enr_status = "未做"
 try:
-    os.environ.setdefault("HTTP_PROXY", "http://127.0.0.1:7890")
-    os.environ.setdefault("HTTPS_PROXY", "http://127.0.0.1:7890")
+    if os.name == "nt":
+        # 本机 Windows 访问 Enrichr 需代理；云端 Linux runner 直连（曾因写死代理致云端富集失败）
+        os.environ.setdefault("HTTP_PROXY", "http://127.0.0.1:7890")
+        os.environ.setdefault("HTTPS_PROXY", "http://127.0.0.1:7890")
     import gseapy as gp
     up_syms = sorted({probe2sym[p] for p in deg_ids if l2fc[expr.index.get_loc(p)] > 0 and probe2sym.get(p)})
     dn_syms = sorted({probe2sym[p] for p in deg_ids if l2fc[expr.index.get_loc(p)] < 0 and probe2sym.get(p)})
