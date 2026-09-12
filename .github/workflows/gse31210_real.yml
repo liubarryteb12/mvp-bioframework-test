@@ -114,6 +114,10 @@ jobs:
             --b demo/export/docB.txt \
             --p demo/export/docP.txt \
             2>&1 | tee ../out/11_export_stdout_real.txt
+          echo "=== Generate docx from manuscript ==="
+          python scripts/export_docx_gse31210.py \
+            --md demo/manuscript_gse31210.md \
+            --docx ../out/manuscript_gse31210.docx 2>&1 | tee ../out/12_docx_stdout.txt
           echo "rc=$?"
         env:
           PARENT_RUN_ID: ${{ github.run_id }}
