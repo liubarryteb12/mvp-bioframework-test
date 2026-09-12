@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.14"   # 对齐基线环境：requirements 钉 numpy==2.5.0（Requires-Python >=3.12），基线实测 Python 3.14
 
       - name: T1–T11 官方流程
         env:
