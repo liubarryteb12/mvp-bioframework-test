@@ -3,7 +3,7 @@ name: GSE31210 Real Data + Framework Validation
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, cloud-validate-gse31210]
     paths:
       - 'crossval/scripts/gse31210_adapter.py'
       - '.github/workflows/gse31210_real.yml'
@@ -25,13 +25,16 @@ jobs:
           pip install --upgrade pip -q
           pip install -r crossval/requirements.txt
           pip install pymupdf python-docx -q
-          # 验证
           python -c "import pandas, numpy, scipy, sklearn, matplotlib, pypdf, fitz; print('deps OK')"
+
+      - name: Create output dirs
+        run: |
+          mkdir -p out/copy crossval/results crossval/demo/export
 
       - name: T1-T9 Framework Validation (Synthetic Baseline)
         run: |
-          cd crossval
           echo "=== T1: verify_all.py (synthetic baseline) ==="
+          cd crossval
           python scripts/verify_all.py 2>&1 | tee ../out/01_verify_stdout.txt
           echo "EXIT=${PIPESTATUS[0]}"
           cp results/report.json ../out/copy/report.json
@@ -77,21 +80,21 @@ jobs:
           import json
           r = json.load(open('results/report.json'))
           s = r['summary']
-          print(f'判定项 {s[\"n_pass\"]}/{s[\"n_pass\"]+s[\"n_fail\"]+s.get(\"n_na\",0)} PASS={s[\"n_pass\"]} FAIL={s[\"n_fail\"]} NA={s.get(\"n_na\",0)}')
+          print(f'判定项 {s['n_pass']}/{s['n_pass']+s['n_fail']+s.get('n_na',0)} PASS={s['n_pass']} FAIL={s['n_fail']} NA={s.get('n_na',0)}')
           "
-        working-directory: crossval
         env:
           PARENT_RUN_ID: ${{ github.run_id }}
 
       - name: GSE31210 Real Data Analysis
         run: |
-          cd crossval
           echo "=== Loading GSE31210 ==="
+          cd crossval
           python scripts/gse31210_adapter.py --datadir .. 2>&1 | head -20
           echo "=== Running real-data analysis ==="
           python scripts/run_gse31210.py 2>&1 | tee ../out/gse31210_analysis_stdout.txt
           echo "EXIT=${PIPESTATUS[0]}"
-        working-directory: crossval
+        env:
+          PARENT_RUN_ID: ${{ github.run_id }}
 
       - name: Generate Manuscript + Guards
         run: |
@@ -99,19 +102,20 @@ jobs:
           echo "=== Writing paper ==="
           python scripts/make_paper_gse31210.py 2>&1 | tee ../out/paper_stdout.txt
           echo "=== Writing guard on real manuscript ==="
-          P1="基于公共数据集GSE31210的转录组风险评分对肺腺癌复发具有独立的预后分层价值"
+          P1="GSE31210转录组评分预测LUAD复发预后"
           python scripts/writing_guard.py \
-            --doc demo/manuscript_fixed.md \
+            --doc results/manuscript_gse31210.md \
             --p1 "$P1" \
             2>&1 | tee ../out/10_writing_stdout_real.txt
           echo "=== Export guard on real manuscript ==="
           python scripts/export_guard.py \
-            --a results/export/docA.txt \
-            --b results/export/docB.txt \
-            --p results/export/docP.txt \
+            --a demo/export/docA.txt \
+            --b demo/export/docB.txt \
+            --p demo/export/docP.txt \
             2>&1 | tee ../out/11_export_stdout_real.txt
           echo "rc=$?"
-        working-directory: crossval
+        env:
+          PARENT_RUN_ID: ${{ github.run_id }}
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
