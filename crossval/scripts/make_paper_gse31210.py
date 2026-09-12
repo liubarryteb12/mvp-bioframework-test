@@ -7,7 +7,7 @@
 import json, os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results")
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "results")
 RESULTS = os.path.join(OUT, "gse31210_results.json")
 FIGURES = os.path.join(OUT, "figures")
 os.makedirs(OUT, exist_ok=True)
