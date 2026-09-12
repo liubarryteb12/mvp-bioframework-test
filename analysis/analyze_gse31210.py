@@ -20,7 +20,7 @@ BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.environ.get(
     "GSE_DATA_PATH",
     r"d:/00.AIagent/codebuddy_workspace/生信分析+SCI文章写作工作流搭建/06.测试用数据/GSE31210_series_matrix.txt.gz")
-ANNOT = os.path.join(BASE, "scripts", "assets", "GPL570.annot.gz")
+ANNOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "GPL570.annot.gz")
 RES = os.path.join(BASE, "results"); os.makedirs(RES, exist_ok=True)
 FIG = os.path.join(BASE, "figures"); os.makedirs(FIG, exist_ok=True)
 FC_MIN, PADJ_MIN = 0.585, 0.05       # T02 DEG
