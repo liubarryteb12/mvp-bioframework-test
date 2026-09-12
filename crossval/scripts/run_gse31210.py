@@ -200,13 +200,8 @@ def run():
 
 def _save_figures(X, log2fc, sig, times, events, groups, auc, delta):
     """Save key figures."""
-    # Fig 1: Volcano plot
+    # Fig 1: Volcano plot (top 30 DE probes)
     fig, ax = plt.subplots(figsize=(6, 4.5))
-    sig_mask = sig
-    x = log2fc[~sig_mask]; y = -np.log10(np.maximum(1e-300, 2*stats.t.sf(np.abs(
-        (X[np.array([0]*len(x), dtype=int)],)  # placeholder
-    ))))
-    # 简化：用 top 30 DE probes 画火山图
     top30 = np.argsort(np.abs(log2fc))[::-1][:30]
     pvals_arr = 2 * stats.t.sf(np.abs(t_stat), df=float(min(n_t,n_n)-1))
     ax.scatter(log2fc[top30], -np.log10(np.maximum(pvals_arr[top30], 1e-300)),

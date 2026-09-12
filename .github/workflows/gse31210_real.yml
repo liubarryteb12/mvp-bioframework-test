@@ -53,7 +53,7 @@ jobs:
           echo "export rc=$?"
 
           echo "=== T5: layout_check.py (with demo figures) ==="
-          python scripts/layout_check.py --figdir figures/demo 2>&1 | tee ../out/02_layout_stdout.txt
+          python scripts/layout_check.py --figdir ../figures/demo 2>&1 | tee ../out/02_layout_stdout.txt
           cp results/layout_report.json ../out/copy/layout_report.json 2>/dev/null || true
 
           echo "=== T6: ablation.py ==="
