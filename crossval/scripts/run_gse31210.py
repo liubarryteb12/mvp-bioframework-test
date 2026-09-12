@@ -190,7 +190,8 @@ def run():
         json.dump(results, f, ensure_ascii=False, indent=2)
 
     # ⑥ 保存关键 figure（DE volcano + KM curve）
-    _save_figures(X, log2fc, sig, times, events, groups, mean_auc, delta)
+    # Recompute t_stat for volcano plot (not passed to function)
+    _save_figures(X, log2fc, sig, t_stat, times, events, groups, mean_auc, delta)
 
     print("\n=== Results ===")
     for k,v in results.items():
@@ -198,7 +199,7 @@ def run():
     print(f"\nSaved to {os.path.join(OUT, 'gse31210_results.json')}")
 
 
-def _save_figures(X, log2fc, sig, times, events, groups, auc, delta):
+def _save_figures(X, log2fc, sig, t_stat, times, events, groups, auc, delta):
     """Save key figures."""
     # Fig 1: Volcano plot (top 30 DE probes)
     fig, ax = plt.subplots(figsize=(6, 4.5))
