@@ -88,7 +88,8 @@ Risk score在中位数分层后，高vs低危组Kaplan-Meier log-rank检验：χ
 *数据溯源: {RESULTS}*
 """
     
-    out_path = os.path.join(cv, "demo", "manuscript_gse31210.md")
+    out_path = os.path.join(OUT, "..", "demo", "manuscript_gse31210.md")
+    out_path = os.path.normpath(out_path)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(paper)
     print(f"Manuscript written to {out_path}")
