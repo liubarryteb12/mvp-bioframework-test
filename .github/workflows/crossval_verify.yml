@@ -145,6 +145,45 @@ jobs:
           path: cloud_out/
           retention-days: 30
 
+  gse31210-analysis:
+    name: GSE31210 真实数据分析出图（05 实战云端复跑）
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: 安装分析依赖
+        run: pip install -r analysis/requirements.txt
+
+      - name: 运行全链分析（QC→DEG→富集→折内建模→Cox/KM→台账→图件）
+        env:
+          GSE_DATA_PATH: ${{ github.workspace }}/GSE31210_series_matrix.txt.gz
+          PYTHONUTF8: "1"
+        run: |
+          cd analysis
+          python analyze_gse31210.py 2>&1 | tee analysis_stdout.txt
+          echo "EXIT=${PIPESTATUS[0]}"
+          python variant_experiment.py 2>&1 | tee variant_stdout.txt
+          echo "EXIT=${PIPESTATUS[0]}"
+          python make_figures.py 2>&1 | tee figures_stdout.txt
+          echo "EXIT=${PIPESTATUS[0]}"
+          python gen_ledger.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gse31210-figures-results
+          path: |
+            figures/
+            results/
+            analysis/analysis_stdout.txt
+            analysis/variant_stdout.txt
+            analysis/figures_stdout.txt
+          retention-days: 30
+
   realdata-preflight:
     name: GSE31210 数据预检（U01 九槽位前置，非分析）
     runs-on: ubuntu-latest

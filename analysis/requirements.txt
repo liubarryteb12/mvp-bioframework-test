@@ -1,0 +1,8 @@
+numpy==2.5.0
+scipy
+scikit-learn
+matplotlib
+pandas
+statsmodels
+gseapy
+Pillow
