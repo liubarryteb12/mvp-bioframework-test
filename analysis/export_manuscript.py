@@ -74,8 +74,9 @@ docA = "\n\n".join([f"{title}\n"] +
                         for x in body_lines], []) +
                    ["[图 1位置]", "[图 2位置]", "[图 3位置]", "[图 4位置]",
                     decl_block, refs_block])
-docB = "\n\n".join([f"图 {n}\n{captions[n]}" for n in sorted(captions)] +
-                   [refs_block])
+docB = "\n\n".join([captions[n] for n in sorted(captions)] + [refs_block])
+# 教训：docB 文本层不放裸"图 N"行——守卫正则的 \s 可跨行吞并，"图 N\n图 N：图注"会粘成
+# 双行图注导致 T9.3 逐字匹配失败；图注行本身含图号，图号集合不受影响。
 docP = "\n\n".join([f"{title}\n"] +
                    [x for x in body_lines
                     if not re.match(r"^(摘要|引言|方法|结果|讨论)$", x)] +
