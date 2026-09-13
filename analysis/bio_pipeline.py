@@ -186,9 +186,12 @@ def m06(ctx, out):
         rnk["gene"] = rnk["gene"].map(lambda i: ctx["probe2sym"].get(i, i))
     rnk = rnk.groupby("gene", as_index=False).max().sort_values("score", ascending=False)
     e = gp.prerank(rnk=rnk, gene_sets="KEGG_2021_Human", outdir=None, no_plot=True)
-    sig = e.results[e.results["FDR q-val"] < 0.25]
+    res = e.results
+    fdr_col = next((c for c in res.columns if "fdr" in c.lower()),
+                   next((c for c in res.columns if "p-val" in c.lower()), res.columns[-1]))
+    sig = res[res[fdr_col] < 0.25]
     sig.to_csv(os.path.join(out, "GSEA_KEGG.csv"), index=False)
-    return f"GSEA 显著通路（FDR<0.25）{int(len(sig))}"
+    return f"GSEA 显著通路（{fdr_col}<0.25）{int(len(sig))}｜结果列={list(res.columns)}"
 
 
 # ---------- M07 生存初筛 ----------
