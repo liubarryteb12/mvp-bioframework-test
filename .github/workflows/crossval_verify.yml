@@ -178,6 +178,16 @@ jobs:
             --a export/docA.txt --b export/docB.txt --p export/docP.txt \
             --out export/export_report.json 2>&1 | tee export_guard_stdout.txt
           echo "EXPORT_GUARD_EXIT=${PIPESTATUS[0]}   # 0=三格式一致（WP-9 全过）"
+          # ===== SCI 写作工作流云端验证：内容（writing_guard 43 项）=====
+          P1=$(awk '/^## 摘要/{f=1;next} f && NF {print; exit}' manuscript_gse31210.md | sed 's/。.*/。/')
+          echo "真实 P1：$P1"
+          python ../crossval/scripts/writing_guard.py \
+            --doc manuscript_gse31210.md --p1 "$P1" \
+            --skill research_survey_skill_output.json 2>&1 | tee writing_guard_stdout.txt
+          echo "WRITING_GUARD_EXIT=${PIPESTATUS[0]}   # 基线 43/43"
+          # ===== 排版/出图云端验证（layout_check：C-6 图内容 + G-7 命名 + 排版层）=====
+          python ../crossval/scripts/layout_check.py --figdir ../figures 2>&1 | tee layout_check_stdout.txt
+          echo "LAYOUT_CHECK_EXIT=${PIPESTATUS[0]}   # 基线 72/72"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -191,6 +201,8 @@ jobs:
             analysis/figures_stdout.txt
             analysis/export_stdout.txt
             analysis/export_guard_stdout.txt
+            analysis/writing_guard_stdout.txt
+            analysis/layout_check_stdout.txt
           retention-days: 30
 
   realdata-preflight:
