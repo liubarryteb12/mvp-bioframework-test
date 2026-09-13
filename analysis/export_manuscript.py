@@ -20,7 +20,7 @@ MD = os.environ.get("MD_PATH") or next(
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "export")
 os.makedirs(OUT, exist_ok=True)
 FIGDIR = os.environ.get("FIG_DIR", os.path.join(BASE, "figures"))
-FIGS = {n: os.path.join(FIGDIR, f"0{n}_" + k)
+FIGS = {n: os.path.join(FIGDIR, f"0{n}_{k}.jpg")   # 300dpi jpg（四格式之一），docx/pdf 内嵌用
         for n, k in {1: "deg_volcano", 2: "enrichment_dotplot",
                      3: "survival_km_risk", 4: "performance_roc_cv"}.items()}
 
