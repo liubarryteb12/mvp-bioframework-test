@@ -186,7 +186,9 @@ def m06(ctx, out):
         rnk["gene"] = rnk["gene"].map(lambda i: ctx["probe2sym"].get(i, i))
     rnk = rnk.groupby("gene", as_index=False).max().sort_values("score", ascending=False)
     e = gp.prerank(rnk=rnk, gene_sets="KEGG_2021_Human", outdir=None, no_plot=True)
-    res = e.results
+    res = getattr(e, "res2d", None)   # prerank/gsea 返回 res2d（enrichr 才是 results），曾误用致 TypeError
+    if res is None:
+        res = e.results
     fdr_col = next((c for c in res.columns if "fdr" in c.lower()),
                    next((c for c in res.columns if "p-val" in c.lower()), res.columns[-1]))
     sig = res[res[fdr_col] < 0.25]
