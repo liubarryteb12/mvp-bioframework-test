@@ -61,6 +61,20 @@ KEYWORDS = "关键词：肺腺癌；转录组风险评分；无复发生存；�
 TITLE_PAGE = [title, "作者信息（投稿前补全）", "单位，城市，国家", "通讯作者：姓名，邮箱"]
 DECL_SUBS = [(p.split("：", 1)[0], p) for p in paras["声明"] if "：" in p]
 
+# ---------- 结构序自检（正文排版规范 v1.0 · S3 机器可检条） ----------
+order = [k for k in sections
+         if k in ("标题", "摘要", "引言", "方法", "结果", "讨论", "结论", "声明", "参考文献")]
+if "结论" not in order:
+    STRUCT = "S1（默认序：结论由摘要'结论'段+讨论末段承载，BMC/Wen 口径）"
+elif order.index("结论") > order.index("讨论"):
+    STRUCT = "S2-a（结论独立节，讨论之后）"
+else:
+    STRUCT = "S2-c（结论前置，投稿前须核对期刊 Guide for Authors）"
+_EXPECT = ["标题", "摘要", "引言", "方法", "结果", "讨论", "声明", "参考文献"]
+if order != _EXPECT:
+    raise SystemExit(f"结构序不符 S1：实际 {order}，期望 {_EXPECT}")
+print(f"[结构序自检] {order} → {STRUCT}")
+
 body_order = ["引言", "方法", "结果", "讨论"]   # 摘要单独按 BMC 式子标题渲染
 citing = {}
 for sec in body_order:
