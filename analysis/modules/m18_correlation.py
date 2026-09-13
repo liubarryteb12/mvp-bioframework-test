@@ -12,12 +12,22 @@ import pandas as pd
 from scipy import stats
 
 
-def _field(meta, sample, prefix):
-    """取 GEO characteristics 字段（同一字段可能拆多行，取第一个非空）。"""
-    vals = [v[len(prefix):].lstrip(":").strip()
-            for v in meta.get(sample, []) if v.startswith(prefix)]
-    vals = [v for v in vals if v]
-    return vals[0] if vals else None
+def _field(meta, sample, key):
+    """取 GEO characteristics 键值（键前缀匹配，值取第一个冒号之后）。
+
+    与执行器 gf() 同版实现（插件不 import 执行器以避免循环依赖）；键常带限定词，
+    如 "age (years): 55"，必须按冒号切分，否则解析出 "(years): 55"。
+    """
+    k = str(key).strip().lower().rstrip(":")
+    for v in meta.get(sample, []):
+        if ":" not in v:
+            continue
+        name, val = v.split(":", 1)
+        if name.strip().lower().startswith(k):
+            val = val.strip()
+            if val:
+                return val
+    return None
 
 
 def collapse_by_symbol(mat, sym):

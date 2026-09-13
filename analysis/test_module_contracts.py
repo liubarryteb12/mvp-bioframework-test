@@ -187,6 +187,42 @@ def test_plugin_sample_similarity_refuses_tiny_design():
 
 
 # ---------- ⑥ v2 方法补齐插件（M18 相关性 / M19 列线图 / M20 LASSO） ----------
+def test_field_parsing_handles_qualified_keys():
+    """回归：字段名带限定词（age (years): 55）时按下标切割会残留 "(years): 55"。
+
+    实证来源：run 34764600101 的 M19 报"协变量完整样本仅 0"（age 全 NaN）。
+    """
+    meta = {"S1": ["tissue: primary lung tumor", "age (years): 55", "gender: female",
+                   "relapse: relapsed", "days before relapse/censor: 253",
+                   "exclude for prognosis analysis due to incomplete resection or "
+                   "adjuvant therapy: exclude", "pathological stage: II", ""]}
+    assert bp.gf(meta, "S1", "tissue:") == "primary lung tumor"
+    assert bp.gf(meta, "S1", "age") == "55", "带限定词的键必须取冒号后的值"
+    assert bp.gf(meta, "S1", "relapse:") == "relapsed"
+    assert bp.gf(meta, "S1", "days before relapse/censor") == "253"
+    assert bp.gf(meta, "S1", "exclude") == "exclude"
+    assert bp.gf(meta, "S1", "pathological stage") == "II"
+    assert bp.gf(meta, "S1", "not_exists") is None
+    m19 = _load_plugin("m19_nomogram.py")
+    assert m19._field(meta, "S1", "gender") == "female"
+    assert pd.to_numeric(m19._field(meta, "S1", "age"), errors="coerce") == pytest.approx(55)
+
+
+def test_m19_covariates_are_configurable_and_numeric():
+    m19 = _load_plugin("m19_nomogram.py")
+    meta = {f"S{i}": [f"age (years): {50 + i}", "gender: male" if i % 2 else "gender: female",
+                      "pathological stage: IB"] for i in range(40)}
+    ctx = {"meta": meta, "config": {}}
+    X = m19._covariates(ctx, [f"S{i}" for i in range(40)])
+    assert X["age"].notna().all() and X["age"].iloc[0] == pytest.approx(50)
+    assert X["male"].sum() == 20 and X["stage_ord"].eq(2.0).all()
+    ctx2 = {"meta": {"S1": ["A: 1", "G: male", "S: III"]},
+            "config": {"age_key": "a", "gender_key": "g", "stage_key": "s"}}
+    X2 = m19._covariates(ctx2, ["S1"])
+    assert X2.loc["S1", "age"] == pytest.approx(1) and X2.loc["S1", "male"] == 1.0
+    assert X2.loc["S1", "stage_ord"] == pytest.approx(4.0), "分期映射应可跨数据集"
+
+
 def test_v2_method_plugins_are_registered():
     loaded = bp.load_plugins()
     for mid in ("M17", "M18", "M19", "M20"):

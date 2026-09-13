@@ -14,12 +14,22 @@ import numpy as np
 import pandas as pd
 
 
-def _field(meta, sample, prefix):
-    """取 GEO characteristics 字段（同一字段可能拆多行，取第一个非空）。"""
-    vals = [v[len(prefix):].lstrip(":").strip()
-            for v in meta.get(sample, []) if v.startswith(prefix)]
-    vals = [v for v in vals if v]
-    return vals[0] if vals else None
+def _field(meta, sample, key):
+    """取 GEO characteristics 键值（键前缀匹配，值取第一个冒号之后）。
+
+    与执行器 gf() 同版实现（插件不 import 执行器以避免循环依赖）；键常带限定词，
+    如 "age (years): 55"、"gender: female"，必须按冒号切分而非按下标切割。
+    """
+    k = str(key).strip().lower().rstrip(":")
+    for v in meta.get(sample, []):
+        if ":" not in v:
+            continue
+        name, val = v.split(":", 1)
+        if name.strip().lower().startswith(k):
+            val = val.strip()
+            if val:
+                return val
+    return None
 
 
 def points_per_unit(coefs, ranges, span=100.0):
@@ -60,14 +70,22 @@ def baseline_at(event_times, cumhaz, t0):
 
 
 def _covariates(ctx, samples):
-    """组装协变量表：年龄 / 男性 / 分期序数（IA<IB<II）/ 可选上游评分。"""
-    meta = ctx["meta"]
-    stage_map = {"IA": 1.0, "IB": 2.0, "II": 3.0}
+    """组装协变量表：年龄 / 男性 / 分期序数 / 可选上游评分。
+
+    字段名因数据集而异 → 可由 config 覆盖（age_key / gender_key / stage_key），
+    默认适配 GSE31210：'age (years)'、'gender'、'pathological stage'。
+    """
+    meta, cfg = ctx["meta"], ctx["config"]
+    stage_map = {"IA": 1.0, "IB": 2.0, "I": 1.0, "II": 3.0,
+                 "IIIA": 4.0, "IIIB": 4.0, "III": 4.0, "IV": 6.0}
+    age_key = cfg.get("age_key", "age")
+    gender_key = cfg.get("gender_key", "gender")
+    stage_key = cfg.get("stage_key", "pathological stage")
     df = pd.DataFrame({
-        "age": [pd.to_numeric(_field(meta, s, "age"), errors="coerce") for s in samples],
-        "male": [1.0 if (_field(meta, s, "sex") or "").lower().startswith("m") else 0.0
-                 for s in samples],
-        "stage_ord": [stage_map.get((_field(meta, s, "pathological stage") or "").strip(), np.nan)
+        "age": [pd.to_numeric(_field(meta, s, age_key), errors="coerce") for s in samples],
+        "male": [1.0 if ((_field(meta, s, gender_key) or _field(meta, s, "sex") or "")
+                         .lower().startswith("m")) else 0.0 for s in samples],
+        "stage_ord": [stage_map.get((_field(meta, s, stage_key) or "").strip().upper(), np.nan)
                       for s in samples],
     }, index=samples)
     score = ctx.get("oof_score")

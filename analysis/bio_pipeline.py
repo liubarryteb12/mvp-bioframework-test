@@ -69,10 +69,23 @@ def load_series_matrix(path):
     return expr, meta, samples
 
 
-def gf(meta, s, prefix):
-    vals = [v[len(prefix):].lstrip(":").strip() for v in meta[s] if v.startswith(prefix)]
-    vals = [v for v in vals if v]
-    return vals[0] if vals else None
+def gf(meta, s, key):
+    """取 GEO characteristics 的键值：键按前缀匹配，值取**第一个冒号之后**。
+
+    为什么按冒号切分而非按下标切割：字段名常带限定词，如 "age (years): 55"、
+    "days before relapse/censor: 253"；按下标切割会残留 "(years): 55"，导致数值解析
+    全部 NaN（run 34764600101 的 M19 实证：协变量完整样本 0）。key 尾部冒号可有可无。
+    """
+    k = str(key).strip().lower().rstrip(":")
+    for v in meta.get(s, []):
+        if ":" not in v:
+            continue
+        name, val = v.split(":", 1)
+        if name.strip().lower().startswith(k):
+            val = val.strip()
+            if val:
+                return val
+    return None
 
 
 # ---------- M01 数据获取 ----------
