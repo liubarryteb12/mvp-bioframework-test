@@ -172,6 +172,12 @@ jobs:
           python make_figures.py 2>&1 | tee figures_stdout.txt
           echo "EXIT=${PIPESTATUS[0]}"
           python gen_ledger.py
+          python export_manuscript.py 2>&1 | tee export_stdout.txt
+          echo "EXIT=${PIPESTATUS[0]}"
+          python ../crossval/scripts/export_guard.py \
+            --a export/docA.txt --b export/docB.txt --p export/docP.txt \
+            --out export/export_report.json 2>&1 | tee export_guard_stdout.txt
+          echo "EXPORT_GUARD_EXIT=${PIPESTATUS[0]}   # 0=三格式一致（WP-9 全过）"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -179,9 +185,12 @@ jobs:
           path: |
             figures/
             results/
+            analysis/export/
             analysis/analysis_stdout.txt
             analysis/variant_stdout.txt
             analysis/figures_stdout.txt
+            analysis/export_stdout.txt
+            analysis/export_guard_stdout.txt
           retention-days: 30
 
   realdata-preflight:

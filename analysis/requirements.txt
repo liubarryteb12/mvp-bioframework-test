@@ -6,3 +6,6 @@ pandas
 statsmodels
 gseapy
 Pillow
+python-docx
+reportlab
+pymupdf
