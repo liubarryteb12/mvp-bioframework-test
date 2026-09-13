@@ -108,7 +108,8 @@ for i, p in enumerate([x for x in disc.split("\n\n") if x.strip()], 1):
 # ---------- C3 锚利用完备性 ----------
 whole = open(MD, encoding="utf-8").read()
 unused = [a for a in anchors if a not in whole]
-print(f"[{'支撑' if not unused else '不支撑'}] C3 锚利用完备性｜未引用锚={unused or '无'}")
+print(f"[{'支撑' if not unused else '待入稿'}] C3 锚利用完备性｜未引用锚={unused or '无'}"
+      + ("（新结果待写作层接入）" if unused else ""))
 rows.append({"主张块": "C3 全稿锚利用", "锚": sorted(anchors), "缺锚": unused,
              "数值数": 0, "失配数值": [],
              "判定": "支撑" if not unused else f"待入稿（{len(unused)} 项新结果未接入结论链）"})
