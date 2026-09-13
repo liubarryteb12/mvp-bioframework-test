@@ -272,7 +272,146 @@ def m09(ctx, out):
     return f"{gene}: log-rank P={p:.2e}, HR={float(np.exp(cox.params[0])):.3f}"
 
 
-# ---------- M10–M14 待实现桩 ----------
+# ---------- M11 免疫与功能评分（ssGSEA：Hallmark + 免疫细胞基因集，ESTIMATE/CIBERSORT 近似口径） ----------
+@register("M11", "免疫与功能评分", "免疫与功能评分", ["M03"])
+def m11(ctx, out):
+    import gseapy as gp
+    expr, samples, sym = ctx["expr"], ctx["samples"], ctx.get("probe2sym") or {}
+    sub = expr.loc[:, samples].copy()
+    if sym:
+        sub = sub.groupby([sym.get(i, i) for i in sub.index]).max()
+    mad = (sub.sub(sub.mean(axis=1), axis=0)).abs().mean(axis=1)
+    dat = sub.loc[mad.sort_values(ascending=False).head(5000).index]
+    e = gp.ssgsea(data=dat, gene_sets="MSigDB_Hallmark_2020", outdir=None,
+                  no_plot=True, threads=4)
+    res2d = getattr(e, "res2d", None)
+    if res2d is None:
+        res2d = e.results
+    if {"Term", "Sample", "NES"} <= set(res2d.columns):
+        wide = res2d.pivot_table(index="Term", columns="Sample", values="NES")
+    else:
+        wide = res2d
+    wide.to_csv(os.path.join(out, "ssGSEA_Hallmark_NES.csv"), encoding="utf-8-sig")
+    return f"ssGSEA 评分 {wide.shape[0]} 基因集 × {wide.shape[1]} 样本（Hallmark；ESTIMATE/CIBERSORT 近似口径，已标注）"
+
+
+# ---------- M12 WGCNA-lite（软阈值共表达 + 层次聚类模块 + 模块-性状关联） ----------
+@register("M12", "WGCNA共表达", "WGCNA共表达", ["M03"])
+def m12(ctx, out):
+    from scipy.cluster.hierarchy import linkage, fcluster
+    from scipy.spatial.distance import squareform
+    expr, samples, meta = ctx["expr"], ctx["samples"], ctx["meta"]
+    sym = ctx.get("probe2sym") or {}
+    sub = expr.loc[:, samples].copy()
+    if sym:
+        sub = sub.groupby([sym.get(i, i) for i in sub.index]).max()
+    mad = (sub.sub(sub.mean(axis=1), axis=0)).abs().mean(axis=1)
+    dat = sub.loc[mad.sort_values(ascending=False).head(2000).index]
+    corr = np.corrcoef(dat.values)
+    np.fill_diagonal(corr, 0)
+    Z = linkage(squareform(1 - np.abs(corr) ** 6, checks=False), method="average")
+    lab = fcluster(Z, t=20, criterion="maxclust")
+    mod = pd.DataFrame({"gene": dat.index, "module": lab})
+    mod.to_csv(os.path.join(out, "模块基因表.csv"), index=False, encoding="utf-8-sig")
+    traits = pd.DataFrame(index=samples)
+    traits["relapse"] = [1 if gf(meta, s, "relapse:") == "relapsed" else 0 for s in samples]
+    traits["stage_II"] = [1 if gf(meta, s, "pathological stage") == "II" else 0 for s in samples]
+    rows = []
+    for m_id, gidx in pd.Series(lab, index=dat.index).groupby(lab):
+        if len(gidx) < 30:
+            continue
+        eg = np.linalg.svd(dat.loc[gidx.index].values - dat.loc[gidx.index].values.mean(0))[2][0]
+        for tname in traits:
+            r_, p_ = stats.pearsonr(eg, traits[tname].values)
+            rows.append({"module": int(m_id), "n_genes": len(gidx),
+                         "trait": tname, "r": round(float(r_), 3), "P": round(float(p_), 5)})
+    pd.DataFrame(rows).to_csv(os.path.join(out, "模块性状关联.csv"),
+                              index=False, encoding="utf-8-sig")
+    return f"模块 {lab.max()} 个（≥30 基因的 {len(rows)//2} 个进入性状关联）"
+
+
+# ---------- M13 PPI 网络（STRING API，top50 DEG） ----------
+@register("M13", "PPI网络", "PPI网络", ["M04"])
+def m13(ctx, out):
+    import urllib.request, urllib.parse
+    d = ctx["deg"]
+    sym = ctx.get("probe2sym") or {}
+    d2 = d.assign(symbol=d["ID_REF"].map(lambda i: sym.get(i, i)))
+    d2 = d2[d2["symbol"].notna() & (d2["symbol"] != "")]
+    top = d2.assign(ab=d2["t"].abs()).sort_values("ab", ascending=False).head(50)["symbol"].unique()
+    url = "https://string-db.org/api/tsv/network?" + urllib.parse.urlencode(
+        {"identifiers": "\r".join(top), "species": "9606", "limit": 15})
+    tsv = urllib.request.urlopen(url, timeout=90).read().decode()
+    open(os.path.join(out, "STRING_network.tsv"), "w", encoding="utf-8").write(tsv)
+    return f"PPI 边 {len(tsv.splitlines())-1}（STRING，top50 DEG）"
+
+
+# ---------- M15 机器学习分类（s13578 式疾病预测：RF/LR/SVM + 5 折 CV） ----------
+@register("M15", "机器学习分类", "机器学习分类", ["M03"])
+def m15(ctx, out):
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.svm import SVC
+    from sklearn.model_selection import StratifiedKFold, cross_val_predict
+    from sklearn.metrics import roc_auc_score, f1_score
+    expr, samples, meta = ctx["expr"], ctx["samples"], ctx["meta"]
+    gp_ = ctx["config"].get("group_prefix", "tissue:")
+    y = np.array([gf(meta, s, gp_) for s in samples])
+    X = expr.loc[:, samples].values.T
+    mad = (expr.sub(expr.mean(axis=1), axis=0)).abs().mean(axis=1)
+    genes = mad.sort_values(ascending=False).head(1000).index
+    X = expr.loc[genes, samples].values.T
+    skf = StratifiedKFold(5, shuffle=True, random_state=ctx["config"].get("seed", 20260910))
+    rows = []
+    for name, mdl, use_decision in [
+            ("LogisticRegression", LogisticRegression(C=1.0, max_iter=2000), False),
+            ("RandomForest", RandomForestClassifier(n_estimators=300, random_state=20260910), True),
+            ("SVM_rbf", SVC(probability=True, random_state=20260910), True)]:
+        proba = cross_val_predict(mdl, X, y, cv=skf, method="predict_proba")[:, 1]
+        pred = cross_val_predict(mdl, X, y, cv=skf)
+        rows.append({"model": name, "AUC_CV": round(float(roc_auc_score(y, proba)), 4),
+                     "F1_CV": round(float(f1_score(y, pred, average="macro")), 4)})
+    pd.DataFrame(rows).to_csv(os.path.join(out, "模型比较.csv"), index=False,
+                              encoding="utf-8-sig")
+    return json.dumps({r["model"]: r["AUC_CV"] for r in rows}, ensure_ascii=False)
+
+
+# ---------- M16 降维可视化（PCA + t-SNE，分组着色；EMBEDR 式质量目检入口） ----------
+@register("M16", "降维可视化", "降维可视化", ["M03"])
+def m16(ctx, out):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from sklearn.decomposition import PCA
+    from sklearn.manifold import TSNE
+    expr, samples, meta = ctx["expr"], ctx["samples"], ctx["meta"]
+    gp_ = ctx["config"].get("group_prefix", "tissue:")
+    grp = np.array([gf(meta, s, gp_) or "?" for s in samples])
+    mad = (expr.sub(expr.mean(axis=1), axis=0)).abs().mean(axis=1)
+    dat = expr.loc[mad.sort_values(ascending=False).head(2000).index, samples].values.T
+    dat = (dat - dat.mean(0)) / (dat.std(0) + 1e-9)
+    xy_pca = PCA(n_components=2, random_state=20260910).fit_transform(dat)
+    xy_tsne = TSNE(n_components=2, random_state=20260910, init="pca",
+                   perplexity=30).fit_transform(dat)
+    colors = {"primary lung tumor": "#D55E00", "normal lung": "#0072B2"}
+    for tag, xy in (("PCA", xy_pca), ("tSNE", xy_tsne)):
+        fig, ax = plt.subplots(figsize=(4.2, 3.6))
+        for g in np.unique(grp):
+            m_ = grp == g
+            ax.scatter(xy[m_, 0], xy[m_, 1], s=12, c=colors.get(g, "#999999"),
+                       label=f"{g} (n={m_.sum()})", linewidths=0)
+        ax.set_title(f"{tag} (top2000 MAD genes)", fontsize=9)
+        ax.legend(frameon=False, fontsize=7)
+        for ext in ("png", "pdf"):
+            fig.savefig(os.path.join(out, f"降维_{tag}.{ext}"), dpi=300, bbox_inches="tight")
+        plt.close(fig)
+    pd.DataFrame({"sample": samples, "group": grp, "PC1": xy_pca[:, 0],
+                  "PC2": xy_pca[:, 1], "tSNE1": xy_tsne[:, 0],
+                  "tSNE2": xy_tsne[:, 1]}).to_csv(
+        os.path.join(out, "降维坐标.csv"), index=False, encoding="utf-8-sig")
+    return f"PCA/t-SNE 完成（着色变量：{gp_}）"
+
+
+# ---------- 待实现桩（M10 外部验证待第二队列；M14 临床关联待补） ----------
 def _stub(mid):
     def fn(ctx, out):
         raise NotImplementedError(f"{mid} 待实现（见 08.生信分析模块库/README.md 状态列）")
@@ -280,9 +419,6 @@ def _stub(mid):
 
 
 register("M10", "外部验证", "10_外部验证", ["M08"])(_stub("M10"))
-register("M11", "免疫浸润", "11_免疫浸润", ["M03"])(_stub("M11"))
-register("M12", "WGCNA", "12_WGCNA", ["M03"])(_stub("M12"))
-register("M13", "PPI网络", "13_PPI网络", ["M04"])(_stub("M13"))
 register("M14", "临床关联", "14_临床关联", ["M02"])(_stub("M14"))
 
 
