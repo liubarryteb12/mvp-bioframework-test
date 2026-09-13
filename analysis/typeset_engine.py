@@ -17,7 +17,7 @@ from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Image as R
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase.ttfonts import TTFont, TTFError
 from PIL import Image
 
 HEADER_TEXT = "PREPRINT MANUSCRIPT DRAFT"
@@ -33,7 +33,7 @@ def register_fonts():
             pdfmetrics.registerFont(TTFont("CJK-Bold", bold if os.path.exists(bold) else reg,
                                            subfontIndex=0 if os.path.exists(bold) else 2))
             return "CJK", "CJK-Bold"
-        except Exception as ex:
+        except (TTFError, OSError, ValueError) as ex:
             print("CJK 注册失败，回落 Helvetica：", ex)
     return "Helvetica", "Helvetica-Bold"
 

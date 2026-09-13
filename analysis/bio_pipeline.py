@@ -7,7 +7,7 @@
       按【执行顺序】建编号文件夹（1_数据质检/2_差异表达/…）→ 代码版本+参数+产物全归档。
 依赖: analysis/requirements.txt；M10–M14 为待实现桩（见 08.生信分析模块库/README.md）。
 """
-import argparse, gzip, hashlib, json, os, re, sys, time
+import argparse, gzip, hashlib, importlib.util, json, os, re, sys, time, traceback
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -273,6 +273,38 @@ def m09(ctx, out):
 
 
 # ---------- M11 免疫与功能评分（ssGSEA：Hallmark + 免疫细胞基因集，ESTIMATE/CIBERSORT 近似口径） ----------
+def to_wide(df, sample_ids):
+    """把 gseapy ssGSEA 输出统一成【基因集 × 样本】宽表（纯函数，可单测）。
+
+    为什么需要它：gseapy 各版本输出形态不稳定——① 宽表（列名即样本 ID）；
+    ② 长表（Name=样本、Term=基因集、值为 NES）。此处按"取值与样本 ID 重合度过半"
+    判定样本列，**不依赖 dtype**：pandas 3 下字符串列 dtype 是 str 而非 object，
+    曾因 `dtype == object` 漏判导致宽表识别失败（模块验证矩阵 run 34758356849 实证）。
+
+    返回 (宽表, 说明)；识别不了返回 (None, 原因)，如实上报，不假装成功。
+    """
+    if df is None or len(df) == 0:
+        return None, "空表"
+    sset = set(map(str, sample_ids))
+    need = max(3, len(sset) // 2)
+    cols = [str(c) for c in df.columns]
+    if len(set(cols) & sset) >= need:            # 情形①：列名即样本
+        return df, "宽表（列名即样本）"
+    non_num = [c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])]
+    # 取值列优先级：NES（标准化富集分数）> ES（累积富集分数）。曾因按列顺序取到 ES
+    # 而写入非标准化数值（契约测试 test_to_wide_from_long_table_with_str_dtype 抓到）。
+    val_col = next((x for x in df.columns if str(x).upper() == "NES"), None) or \
+        next((x for x in df.columns if str(x).upper() == "ES"), None)
+    for c in non_num:                            # 情形②：长表 → 找样本列
+        if len(set(map(str, df[c])) & sset) >= need:
+            others = [x for x in non_num if x != c]
+            if not others or val_col is None:
+                continue
+            wide = df.pivot_table(index=others[0], columns=c, values=val_col)
+            return wide, f"长表转宽（样本列={c}，基因集列={others[0]}，值={val_col}）"
+    return None, f"列={cols}；无列取值与样本 ID 重合过半（阈值 {need}）"
+
+
 @register("M11", "免疫与功能评分", "免疫与功能评分", ["M03"])
 def m11(ctx, out):
     import gseapy as gp
@@ -291,33 +323,19 @@ def m11(ctx, out):
             cands[nm] = v
     for nm, df in cands.items():          # 原始表全留，供复核
         df.to_csv(os.path.join(out, f"ssGSEA_{nm}_raw.csv"), encoding="utf-8-sig")
-    sset = set(map(str, samples))
-    chosen = None
+    chosen, reasons = None, []
     for nm, df in cands.items():
-        cols = set(map(str, df.columns))
-        # 情形①：宽表（列名即样本 ID）
-        if len(cols & sset) >= max(3, len(samples) // 2):
-            chosen = (nm, df, "宽表"); break
-        # 情形②：长表（Name/Term/ES/NES 之类）——哪一列的取值与样本 ID 重合过半即为样本列
-        if "NES" in cols:
-            for c in cols:
-                if df[c].dtype == object:
-                    hit = len(set(map(str, df[c])) & sset)
-                    if hit >= max(3, len(samples) // 2):
-                        other = [x for x in cols if x not in (c, "NES", "ES")]
-                        term_col = other[0] if other else None
-                        if term_col:
-                            wide = df.pivot_table(index=term_col, columns=c, values="NES")
-                            chosen = (nm, wide, f"长表转宽（样本列={c}，基因集列={term_col}）")
-                            break
-        if chosen:
+        wide, why = to_wide(df, samples)
+        if wide is not None:
+            chosen = (nm, wide, why)
             break
+        reasons.append(f"{nm}: {why}")
     if chosen:
         chosen[1].to_csv(os.path.join(out, "ssGSEA_Hallmark_NES.csv"), encoding="utf-8-sig")
         return (f"ssGSEA 评分表 {chosen[1].shape}（{chosen[2]}；来源 {chosen[0]}；Hallmark；"
                 f"ESTIMATE/CIBERSORT 近似口径，已标注）")
     return (f"ssGSEA 已产出 raw 表 {[(k, list(v.columns)) for k, v in cands.items()]}；"
-            f"宽表未识别，待复核（不假装成功）")
+            f"宽表未识别，待复核（不假装成功）：{'; '.join(reasons)}")
 
 
 # ---------- M12 WGCNA-lite（软阈值共表达 + 层次聚类模块 + 模块-性状关联） ----------
@@ -448,6 +466,53 @@ register("M10", "外部验证", "10_外部验证", ["M08"])(_stub("M10"))
 register("M14", "临床关联", "14_临床关联", ["M02"])(_stub("M14"))
 
 
+# ---------- 插件加载与装配校验 ----------
+def load_plugins():
+    """加载 analysis/modules/*.py 插件，使新分析方法"丢一个文件"即可成为可调用单元。
+
+    插件契约：文件内定义 MODULES = [{"id","name","folder","deps","fn"}, ...]，
+    由执行器注册（不在插件里 import 本文件，避免循环依赖）。
+    单个插件加载失败只告警并跳过，不影响既有模块（插件是增量，不是关键路径）。
+    """
+    pdir = os.path.join(HERE, "modules")
+    if not os.path.isdir(pdir):
+        return []
+    loaded = []
+    for fn in sorted(os.listdir(pdir)):
+        if not fn.endswith(".py") or fn.startswith("_"):
+            continue
+        path = os.path.join(pdir, fn)
+        spec = importlib.util.spec_from_file_location(f"biomod_{fn[:-3]}", path)
+        try:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            for m in getattr(mod, "MODULES", []):
+                REG[m["id"]] = {"name": m["name"], "folder": m["folder"],
+                                "fn": m["fn"], "deps": m.get("deps", [])}
+                loaded.append(m["id"])
+        except (ImportError, AttributeError, KeyError, TypeError, SyntaxError,
+                NameError, OSError) as ex:
+            print(f"⚠ 插件 {fn} 加载失败（已跳过）：{type(ex).__name__}: {ex}")
+    return loaded
+
+
+def validate_config(cfg):
+    """装配合法性检查。返回 (致命错误, 警告)。
+
+    致命：模块未注册（跑不了）；警告：依赖未出现在其之前（顺序可疑但可能仍成立）。
+    """
+    errs, warns, seen = [], [], []
+    for mid in cfg.get("modules", []):
+        if mid not in REG:
+            errs.append(f"未注册模块 {mid}")
+            continue
+        missing = [d for d in REG[mid].get("deps", []) if d not in seen]
+        if missing:
+            warns.append(f"{mid} 声明的依赖 {missing} 未出现在其之前")
+        seen.append(mid)
+    return errs, warns
+
+
 # ---------- 主流程 ----------
 def main():
     ap = argparse.ArgumentParser()
@@ -458,6 +523,14 @@ def main():
     os.makedirs(run_dir, exist_ok=True)
     ctx = {"config": cfg}
     log = []
+    plug = load_plugins()
+    if plug:
+        log.append(f"🔌 已加载插件模块：{plug}")
+    errs, warns = validate_config(cfg)
+    log += [f"⚠ 装配警告：{w}" for w in warns]
+    if errs:
+        print("\n".join(log + [f"❌ 装配致命错误：{e}" for e in errs]))
+        raise SystemExit("装配校验未通过，未执行任何模块")
     commit = os.environ.get("GIT_COMMIT", "unknown")
     for i, mid in enumerate(cfg["modules"], 1):
         m = REG[mid]
@@ -469,13 +542,32 @@ def main():
                   open(os.path.join(out, "_模块信息.json"), "w", encoding="utf-8"),
                   ensure_ascii=False, indent=1)
         t0 = time.time()
+        # 异常分类：按"用户能据此改什么"分组报错，禁止静默吞掉
         try:
             msg = m["fn"](ctx, out)
             log.append(f"✅ {i}_{m['folder']} ({mid} {m['name']}): {msg} [{time.time()-t0:.1f}s]")
         except NotImplementedError as ex:
             log.append(f"⏸ {i}_{m['folder']} ({mid}): 待实现 — {ex}")
-        except Exception as ex:
-            log.append(f"❌ {i}_{m['folder']} ({mid}): {type(ex).__name__}: {ex}")
+        except ModuleNotFoundError as ex:
+            log.append(f"❌ {i}_{m['folder']} ({mid}): 缺依赖 {ex.name}，"
+                       f"请加入 analysis/requirements.txt")
+            break
+        except (FileNotFoundError, PermissionError, OSError) as ex:
+            log.append(f"❌ {i}_{m['folder']} ({mid}): 数据/路径错误 "
+                       f"{type(ex).__name__}: {ex}")
+            break
+        except (KeyError, ValueError, TypeError) as ex:
+            log.append(f"❌ {i}_{m['folder']} ({mid}): 参数或数据格式错误 "
+                       f"{type(ex).__name__}: {ex}")
+            break
+        except SystemExit as ex:
+            log.append(f"❌ {i}_{m['folder']} ({mid}): 输入不满足前置条件 — {ex}")
+            break
+        except Exception as ex:      # 兜底：模块未知异常不得静默，必须留完整 traceback
+            with open(os.path.join(run_dir, "异常详情.txt"), "a", encoding="utf-8") as fh:
+                fh.write(f"[{mid} {m['name']}]\n{traceback.format_exc()}\n")
+            log.append(f"❌ {i}_{m['folder']} ({mid}): {type(ex).__name__}: {ex}"
+                       f"（完整 traceback → 异常详情.txt）")
             break
     open(os.path.join(run_dir, "pipeline_log.txt"), "w", encoding="utf-8").write("\n".join(log))
     print("\n".join(log))

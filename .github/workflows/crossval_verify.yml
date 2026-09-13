@@ -159,6 +159,14 @@ jobs:
       - name: 安装分析依赖
         run: pip install -r analysis/requirements.txt
 
+      - name: 模块契约冒烟测试（模块"可用性"验收，规范依据 10.代码生成规范参考）
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          cd analysis
+          python -m pytest test_module_contracts.py -q -p no:cacheprovider 2>&1 | tee module_contracts_stdout.txt
+          echo "CONTRACT_EXIT=${PIPESTATUS[0]}   # 0=注册表/配置/纯函数/适配器/插件契约全绿"
+
       - name: 运行全链分析（QC→DEG→富集→折内建模→Cox/KM→台账→图件）
         env:
           GSE_DATA_PATH: ${{ github.workspace }}/GSE31210_series_matrix.txt.gz
@@ -198,6 +206,9 @@ jobs:
           echo "PIPELINE_EXIT=${PIPESTATUS[0]}"
           python bio_pipeline.py --config pipeline_config_modules_ext.json 2>&1 | tee pipeline_ext_log.txt
           echo "PIPELINE_EXT_EXIT=${PIPESTATUS[0]}"
+          # 插件机制验证：新增模块以 modules/ 文件形式增量接入（不需改执行器）
+          python bio_pipeline.py --config pipeline_config_plugin_demo.json 2>&1 | tee pipeline_plugin_log.txt
+          echo "PIPELINE_PLUGIN_EXIT=${PIPESTATUS[0]}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -214,6 +225,10 @@ jobs:
             analysis/writing_guard_stdout.txt
             analysis/layout_check_stdout.txt
             analysis/claim_audit_stdout.txt
+            analysis/module_contracts_stdout.txt
+            analysis/pipeline_demo_log.txt
+            analysis/pipeline_ext_log.txt
+            analysis/pipeline_plugin_log.txt
             analysis/runs/
           retention-days: 30
 
