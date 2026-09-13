@@ -116,7 +116,7 @@ def m01(ctx, out):
 
 
 # ---------- M02 数据质检 ----------
-@register("M02", "数据质检", "2_数据质检", ["M01"])
+@register("M02", "数据质检", "数据质检", ["M01"])
 def m02(ctx, out):
     expr, meta, samples = ctx["expr"], ctx["meta"], ctx["samples"]
     grp = [gf(meta, s, ctx["config"].get("group_prefix", "tissue:")) for s in samples]
@@ -130,7 +130,7 @@ def m02(ctx, out):
 
 
 # ---------- M03 预处理 ----------
-@register("M03", "预处理", "3_预处理", ["M01"])
+@register("M03", "预处理", "预处理", ["M01"])
 def m03(ctx, out):
     expr = np.log2(ctx["expr"] + 1)
     expr.to_csv(os.path.join(out, "expr_log2.csv"), encoding="utf-8-sig")
@@ -139,7 +139,7 @@ def m03(ctx, out):
 
 
 # ---------- M04 差异表达 ----------
-@register("M04", "差异表达", "4_差异表达", ["M02", "M03"])
+@register("M04", "差异表达", "差异表达", ["M02", "M03"])
 def m04(ctx, out):
     expr, meta, samples = ctx["expr"], ctx["meta"], ctx["samples"]
     gp = ctx["config"].get("group_prefix", "tissue:")
@@ -157,7 +157,7 @@ def m04(ctx, out):
 
 
 # ---------- M05 GO/KEGG 富集（ORA） ----------
-@register("M05", "GO_KEGG富集", "5_GO_KEGG富集", ["M04"])
+@register("M05", "GO_KEGG富集", "GO_KEGG富集", ["M04"])
 def m05(ctx, out):
     import gseapy as gp
     d = ctx["deg"]
@@ -177,7 +177,7 @@ def m05(ctx, out):
 
 
 # ---------- M06 GSEA ----------
-@register("M06", "GSEA富集", "6_GSEA富集", ["M04"])
+@register("M06", "GSEA富集", "GSEA富集", ["M04"])
 def m06(ctx, out):
     import gseapy as gp
     d = ctx["deg"].sort_values("t", ascending=False)
@@ -185,14 +185,14 @@ def m06(ctx, out):
     if ctx.get("probe2sym"):
         rnk["gene"] = rnk["gene"].map(lambda i: ctx["probe2sym"].get(i, i))
     rnk = rnk.groupby("gene", as_index=False).max().sort_values("score", ascending=False)
-    e = gp.prank(rnk=rnk, gene_sets="KEGG_2021_Human", outdir=None, no_plot=True)
+    e = gp.prerank(rnk=rnk, gene_sets="KEGG_2021_Human", outdir=None, no_plot=True)
     sig = e.results[e.results["FDR q-val"] < 0.25]
     sig.to_csv(os.path.join(out, "GSEA_KEGG.csv"), index=False)
     return f"GSEA 显著通路（FDR<0.25）{int(len(sig))}"
 
 
 # ---------- M07 生存初筛 ----------
-@register("M07", "生存初筛", "7_生存初筛", ["M02", "M03"])
+@register("M07", "生存初筛", "生存初筛", ["M02", "M03"])
 def m07(ctx, out):
     expr, meta, samples = ctx["expr"], ctx["meta"], ctx["samples"]
     keep = [s for s in samples
@@ -217,7 +217,7 @@ def m07(ctx, out):
 
 
 # ---------- M08 风险建模（无泄露协议） ----------
-@register("M08", "风险建模", "8_风险建模", ["M04", "M07"])
+@register("M08", "风险建模", "风险建模", ["M04", "M07"])
 def m08(ctx, out):
     from sklearn.linear_model import LogisticRegression
     from sklearn.model_selection import StratifiedKFold
@@ -249,7 +249,7 @@ def m08(ctx, out):
 
 
 # ---------- M09 生存分析（指定基因/评分） ----------
-@register("M09", "生存分析", "9_生存分析", ["M02", "M03"])
+@register("M09", "生存分析", "生存分析", ["M02", "M03"])
 def m09(ctx, out):
     from statsmodels.duration.hazard_regression import PHReg
     expr, keep, tt, ev = ctx["expr"], ctx["keep"], ctx["tt"], ctx["ev"]
