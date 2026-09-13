@@ -521,7 +521,7 @@ def main():
     cfg = json.load(open(a.config, encoding="utf-8"))
     run_dir = os.path.join(HERE, "runs", cfg.get("run_name", time.strftime("%Y%m%d_%H%M")))
     os.makedirs(run_dir, exist_ok=True)
-    ctx = {"config": cfg}
+    ctx = {"config": cfg, "logrank": logrank, "bh": bh}   # 公共纯函数注入，供插件复用
     log = []
     plug = load_plugins()
     if plug:

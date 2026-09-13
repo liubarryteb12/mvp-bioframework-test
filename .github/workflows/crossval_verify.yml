@@ -209,6 +209,9 @@ jobs:
           # 插件机制验证：新增模块以 modules/ 文件形式增量接入（不需改执行器）
           python bio_pipeline.py --config pipeline_config_plugin_demo.json 2>&1 | tee pipeline_plugin_log.txt
           echo "PIPELINE_PLUGIN_EXIT=${PIPESTATUS[0]}"
+          # v2 参考文件方法补齐：M18 相关性 / M20 LASSO 稀疏模型 / M19 列线图
+          python bio_pipeline.py --config pipeline_config_v2_methods.json 2>&1 | tee pipeline_v2_log.txt
+          echo "PIPELINE_V2_EXIT=${PIPESTATUS[0]}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -229,6 +232,7 @@ jobs:
             analysis/pipeline_demo_log.txt
             analysis/pipeline_ext_log.txt
             analysis/pipeline_plugin_log.txt
+            analysis/pipeline_v2_log.txt
             analysis/runs/
           retention-days: 30
 

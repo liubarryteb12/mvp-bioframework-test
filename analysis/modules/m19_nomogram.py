@@ -1,0 +1,157 @@
+# -*- coding: utf-8 -*-
+"""M19 列线图与 5 年无复发生存换算（内化自参考文件 D 层 #14 ROC/列线图）。
+
+做法：Cox PH（临床变量 + 可选上游风险评分）→ ① 系数表（HR/CI/P）；
+② 简化列线图（各变量按"系数 × 取值范围"的效应量线性映射到 0–100 分）；
+③ 总分 → 5 年无复发生存概率换算表（Breslow 基线累积风险）。
+
+口径声明：本列线图为"基于 Cox 线性预测子的简化版"，适合论文展示与交互复核，
+不作为独立验证证据；评分若来自上游模块，须注意其口径（见模块验证矩阵交叉核对表）。
+"""
+import os
+
+import numpy as np
+import pandas as pd
+
+
+def _field(meta, sample, prefix):
+    """取 GEO characteristics 字段（同一字段可能拆多行，取第一个非空）。"""
+    vals = [v[len(prefix):].lstrip(":").strip()
+            for v in meta.get(sample, []) if v.startswith(prefix)]
+    vals = [v for v in vals if v]
+    return vals[0] if vals else None
+
+
+def points_per_unit(coefs, ranges, span=100.0):
+    """列线图分值映射（纯函数）。
+
+    Args:
+      coefs: {变量: Cox 系数}
+      ranges: {变量: (min, max)} 该变量取值范围
+      span: 效应量最大的变量其全范围对应的分值（默认 100）
+
+    Returns:
+      {变量: {"per_unit": 每单位取值分值, "range_points": 全范围分值}}
+      使 max(|coef|*range) 的变量 range_points = span，其余按比例。
+    """
+    effects = {k: abs(coefs[k]) * abs(ranges[k][1] - ranges[k][0]) for k in coefs}
+    mx = max(effects.values()) if effects else 0.0
+    if mx == 0:
+        return {k: {"per_unit": 0.0, "range_points": 0.0} for k in coefs}
+    return {k: {"per_unit": span * abs(coefs[k]) / mx,
+                "range_points": span * effects[k] / mx} for k in coefs}
+
+
+def surv_prob(baseline_cumhaz_at_t, linear_predictor):
+    """Cox 基线生存 → 个体 t 时点生存概率 S(t) = exp(-H0(t)·exp(lp))（纯函数）。"""
+    return float(np.exp(-float(baseline_cumhaz_at_t) * np.exp(float(linear_predictor))))
+
+
+def baseline_at(event_times, cumhaz, t0):
+    """取 t0 处的基线累积风险（阶跃函数，右连续；纯函数，便于单测）。"""
+    et = np.asarray(event_times, dtype=float)
+    ch = np.asarray(cumhaz, dtype=float).ravel()
+    if et.size == 0 or ch.size == 0:
+        return 0.0
+    n = min(et.size, ch.size)
+    et, ch = et[:n], ch[:n]
+    idx = np.searchsorted(et, float(t0), side="right") - 1
+    return float(ch[idx]) if idx >= 0 else 0.0
+
+
+def _covariates(ctx, samples):
+    """组装协变量表：年龄 / 男性 / 分期序数（IA<IB<II）/ 可选上游评分。"""
+    meta = ctx["meta"]
+    stage_map = {"IA": 1.0, "IB": 2.0, "II": 3.0}
+    df = pd.DataFrame({
+        "age": [pd.to_numeric(_field(meta, s, "age"), errors="coerce") for s in samples],
+        "male": [1.0 if (_field(meta, s, "sex") or "").lower().startswith("m") else 0.0
+                 for s in samples],
+        "stage_ord": [stage_map.get((_field(meta, s, "pathological stage") or "").strip(), np.nan)
+                      for s in samples],
+    }, index=samples)
+    score = ctx.get("oof_score")
+    if score is not None:
+        df["risk_score"] = pd.to_numeric(score.reindex(samples), errors="coerce")
+    return df
+
+
+def run(ctx, out):
+    """模块入口：Cox 系数表 + 简化列线图 + 总分-5年无复发生存表。"""
+    from statsmodels.duration.hazard_regression import PHReg
+    cfg = ctx["config"]
+    horizon_days = float(cfg.get("horizon_days", 1825))
+    samples, tt, ev = ctx["keep"], ctx["tt"], ctx["ev"]
+    X = _covariates(ctx, samples)
+    mask = np.isfinite(X.to_numpy(dtype=float)).all(axis=1) & np.isfinite(tt)
+    if mask.sum() < 30:
+        return (f"协变量完整样本仅 {int(mask.sum())}（<30），不足以拟合 Cox，"
+                f"不产出列线图（不假装成功）")
+    Xm, ttm, evm, idx = X[mask], tt[mask], ev[mask], np.where(mask)[0]
+    cox = PHReg(ttm, Xm.to_numpy(dtype=float), status=evm).fit()
+    coefs = {c: float(cox.params[i]) for i, c in enumerate(Xm.columns)}
+    ci = cox.conf_int()
+    coef_tab = pd.DataFrame({
+        "variable": list(coefs),
+        "coef": [coefs[c] for c in coefs],
+        "HR": [float(np.exp(coefs[c])) for c in coefs],
+        "CI_low": [float(np.exp(ci[i][0])) for i in range(len(coefs))],
+        "CI_high": [float(np.exp(ci[i][1])) for i in range(len(coefs))],
+        "P": [float(cox.pvalues[i]) for i in range(len(coefs))],
+    })
+    coef_tab.to_csv(os.path.join(out, "M19_Cox系数表.csv"), index=False, encoding="utf-8-sig")
+
+    ranges = {c: (float(Xm[c].min()), float(Xm[c].max())) for c in Xm.columns}
+    pts = points_per_unit(coefs, ranges)
+
+    # 基线累积风险：statsmodels 版本差异 → 先取曲线，再按事件时刻对齐（长度不一致则截断）
+    bh = np.asarray(cox.baseline_cumulative_hazard()).ravel()
+    et = np.sort(np.unique(np.asarray(ttm, dtype=float)[np.asarray(evm, dtype=int) == 1]))
+    h0 = baseline_at(et, bh, horizon_days)
+
+    lp = Xm.to_numpy(dtype=float) @ np.asarray(list(coefs.values()))
+    total_points = np.zeros(len(Xm))
+    for c in Xm.columns:
+        total_points += pts[c]["per_unit"] * (Xm[c].to_numpy() - ranges[c][0])
+    conv = pd.DataFrame({
+        "total_points": np.round(total_points, 1),
+        "linear_predictor": lp,
+        f"RFS_prob_{int(horizon_days)}d": [surv_prob(h0, v) for v in lp],
+    }).sort_values("total_points")
+    conv.to_csv(os.path.join(out, f"M19_总分_{int(horizon_days)}天无复发生存.csv"),
+                index=False, encoding="utf-8-sig")
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    n = len(pts)
+    fig, ax = plt.subplots(figsize=(7.2, 0.9 + 0.55 * n), dpi=300)
+    for i, (c, v) in enumerate(pts.items()):
+        y = n - i
+        ax.hlines(y, 0, 100, color="#334155", lw=1.0)
+        for tick in range(0, 101, 10):
+            ax.vlines(tick, y - 0.08, y + 0.08, color="#334155", lw=0.7)
+        ax.text(-2, y, f"{c}\n[HR {np.exp(coefs[c]):.2f}]", ha="right", va="center", fontsize=7)
+        lo, hi = ranges[c]
+        ax.text(0, y + 0.22, f"{lo:.3g}", fontsize=6, ha="center")
+        ax.text(100, y + 0.22, f"{hi:.3g}", fontsize=6, ha="center")
+        ax.text(50, y - 0.3, f"全范围={v['range_points']:.0f} 分", fontsize=6,
+                ha="center", color="#0072B2")
+    ax.set_xlim(-30, 110); ax.set_ylim(0.3, n + 0.8)
+    ax.set_yticks([]); ax.set_xlabel("Points", fontsize=8)
+    ax.set_title(f"Simplified nomogram (Cox; n={int(mask.sum())})", fontsize=9)
+    for s in ("top", "right", "left"):
+        ax.spines[s].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, "M19_列线图.png"), dpi=300)
+    plt.close(fig)
+
+    sig = [c for c in coefs if float(cox.pvalues[list(coefs).index(c)]) < 0.05]
+    return (f"n={int(mask.sum())}；H0({int(horizon_days)}d)={h0:.3f}；"
+            f"显著变量 {sig if sig else '无'}（P<0.05）")
+
+
+MODULES = [
+    {"id": "M19", "name": "列线图与5年无复发生存", "folder": "列线图",
+     "deps": ["M07"], "fn": run},
+]

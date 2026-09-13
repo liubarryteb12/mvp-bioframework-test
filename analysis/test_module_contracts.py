@@ -184,3 +184,57 @@ def test_plugin_sample_similarity_refuses_tiny_design():
     mod = _load_plugin("m17_sample_similarity.py")
     expr = pd.DataFrame(np.ones((5, 2)), columns=["a", "b"])
     assert mod.sample_similarity(expr, 0.8) == (None, None)
+
+
+# ---------- ⑥ v2 方法补齐插件（M18 相关性 / M19 列线图 / M20 LASSO） ----------
+def test_v2_method_plugins_are_registered():
+    loaded = bp.load_plugins()
+    for mid in ("M17", "M18", "M19", "M20"):
+        assert mid in loaded, f"{mid} 未注册；已加载 {loaded}"
+
+
+def test_m18_corr_matrix_and_traits():
+    m18 = _load_plugin("m18_correlation.py")
+    x = np.linspace(0, 1, 20)
+    samples = [f"S{i}" for i in range(20)]
+    mat = pd.DataFrame(np.column_stack([x, 2 * x + 1, -x]).T,
+                       index=["g1", "g2", "g3"], columns=samples)
+    cm = m18.corr_matrix(mat)
+    assert cm.shape == (3, 3)
+    assert cm.loc["g1", "g2"] == pytest.approx(1.0), "线性同向应 r=1"
+    assert cm.loc["g1", "g3"] == pytest.approx(-1.0), "线性反向应 r=-1"
+    traits = pd.DataFrame({"t": x, "nan_col": [np.nan] * 20}, index=samples)
+    tab = m18.corr_with_traits(mat, traits, min_n=10)
+    hit = tab[(tab.gene == "g1") & (tab.trait == "t")].iloc[0]
+    assert hit["r"] == pytest.approx(1.0) and hit["n"] == 20
+    miss = tab[(tab.gene == "g1") & (tab.trait == "nan_col")].iloc[0]
+    assert np.isnan(miss["r"]), "有效配对不足时不得给出相关系数"
+
+
+def test_m19_nomogram_scaling_and_survival():
+    m19 = _load_plugin("m19_nomogram.py")
+    coefs = {"a": 1.0, "b": 2.0, "c": 3.0}
+    ranges = {"a": (0, 10), "b": (0, 10), "c": (0, 10)}
+    pts = m19.points_per_unit(coefs, ranges, span=100.0)
+    assert pts["c"]["range_points"] == pytest.approx(100.0), "最大效应变量全范围=100 分"
+    assert pts["a"]["range_points"] == pytest.approx(100 / 3)
+    assert m19.surv_prob(0.1, 0.0) == pytest.approx(np.exp(-0.1))
+    assert m19.surv_prob(0.0, 99.0) == pytest.approx(1.0)
+    et = np.array([100.0, 200.0, 300.0])
+    ch = np.array([0.05, 0.12, 0.20])
+    assert m19.baseline_at(et, ch, 150.0) == pytest.approx(0.05)
+    assert m19.baseline_at(et, ch, 250.0) == pytest.approx(0.12)
+    assert m19.baseline_at(et, ch, 50.0) == pytest.approx(0.0)
+
+
+def test_m20_lasso_is_sparse_and_deterministic():
+    m20 = _load_plugin("m20_lasso_cox.py")
+    rng = np.random.default_rng(11)
+    n, p = 120, 60
+    X = rng.normal(size=(n, p))
+    signal = X[:, 0] - 1.5 * X[:, 1]
+    y = (signal + rng.normal(scale=0.5, size=n) > 0).astype(int)
+    sel, coef = m20.lasso_select(X, y, c=0.05)
+    assert 0 < sel.sum() < p, f"LASSO 应稀疏（入选 {sel.sum()}/{p}）"
+    sel2, coef2 = m20.lasso_select(X, y, c=0.05)
+    assert np.array_equal(sel, sel2) and np.allclose(coef, coef2), "同输入须同输出"
