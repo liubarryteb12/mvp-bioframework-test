@@ -67,22 +67,35 @@ abstract = "\n".join(sections["摘要"])
 disc = "\n\n".join(sections["讨论"])
 
 rows = []
-def audit(tag, text):
+def audit(tag, text, allow_no_anchor=False):
+    # 先剔除引用标记（[L-001] 锚号、[4] 参考文献号），防数字正则误切（首轮误报实证）
+    clean = re.sub(r"\[(?:L-\d{3}|\d+)\]", "", text)
     anc = sorted(set(re.findall(r"\[(L-\d{3})\]", text)), key=lambda s: int(s[3:]))
     bad_anc = [a for a in anc if a not in anchors]
-    bad_num = []
-    nums = NUM.findall(text)
-    for tok in nums:
-        if not num_ok(tok):
-            bad_num.append(tok)
-    ok = (len(anc) > 0 or tag.startswith("摘要")) and not bad_anc and not bad_num
+    bad_num = [tok for tok in NUM.findall(clean) if not num_ok(tok)]
+    ok = (len(anc) > 0 or allow_no_anchor) and not bad_anc and not bad_num
     rows.append({"主张块": tag, "锚": anc, "缺锚": bad_anc,
-                 "数值数": len(nums), "失配数值": bad_num, "判定": "支撑" if ok else "不支撑"})
+                 "数值数": len(NUM.findall(clean)), "失配数值": bad_num,
+                 "判定": "支撑" if ok else "不支撑"})
     print(f"[{'支撑' if ok else '不支撑'}] {tag}｜锚={anc or '—'}｜失配数值={bad_num or '无'}")
 
-audit("摘要·P1+背景+方法+结果+结论", abstract)
+# 摘要拆主张块：P1/结果/结论 为结果性主张（数值审计）；背景/方法 为设计参数（不在范围）
+p1_txt = re.split(r"背景：", abstract)[0]
+audit("摘要·P1 主张", p1_txt)
+_abs = re.split(r"(背景：|方法：|结果：|结论：)", abstract)
+blocks, _cur = {}, None
+for seg in _abs[1:]:
+    if seg in ("背景：", "方法：", "结果：", "结论："):
+        _cur = seg.rstrip("：")
+    elif _cur:
+        blocks[_cur] = blocks.get(_cur, "") + seg
+for k in ("背景", "方法"):
+    print(f"[跳过] 摘要·{k}｜设计参数段，不在数值审计范围")
+audit("摘要·结果主张", blocks.get("结果", ""))
+audit("摘要·结论主张", blocks.get("结论", ""))
 for i, p in enumerate([x for x in disc.split("\n\n") if x.strip()], 1):
-    audit(f"讨论·第{i}段", p)
+    allow = p.startswith(("局限", "展望"))   # 局限/展望段无结果主张，无锚合法
+    audit(f"讨论·第{i}段", p, allow_no_anchor=allow)
 
 # ---------- C3 锚利用完备性 ----------
 whole = open(MD, encoding="utf-8").read()
