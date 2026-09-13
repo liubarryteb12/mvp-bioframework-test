@@ -195,6 +195,9 @@ jobs:
           # ===== 排版/出图云端验证（layout_check：C-6 图内容 + G-7 命名 + 排版层）=====
           python ../crossval/scripts/layout_check.py --figdir ../figures 2>&1 | tee layout_check_stdout.txt
           echo "LAYOUT_CHECK_EXIT=${PIPESTATUS[0]}   # 基线 72/72"
+          # ===== 生信分析模块库：点菜式流水线演示（菜单→编号归档）=====
+          python bio_pipeline.py --config pipeline_config_gse31210_demo.json 2>&1 | tee pipeline_demo_log.txt
+          echo "PIPELINE_EXIT=${PIPESTATUS[0]}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -211,6 +214,7 @@ jobs:
             analysis/writing_guard_stdout.txt
             analysis/layout_check_stdout.txt
             analysis/claim_audit_stdout.txt
+            analysis/runs/
           retention-days: 30
 
   realdata-preflight:
