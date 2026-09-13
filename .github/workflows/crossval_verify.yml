@@ -148,7 +148,7 @@ jobs:
   gse31210-analysis:
     name: GSE31210 真实数据分析出图（05 实战云端复跑）
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
