@@ -9,7 +9,7 @@
   export_report.json       = 守卫台账
 一致性由同一内容源构造保证：图注串、参考文献节在三版本逐字节相同。
 """
-import os, re, sys
+import io, os, re, sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 稿件定位：优先脚本同目录（云端仓库 analysis/ 布局），回落 本地 稿件/ 目录
