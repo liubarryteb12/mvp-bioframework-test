@@ -12,7 +12,11 @@
 import os, re, sys
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MD = os.path.join(BASE, "稿件", "manuscript_gse31210.md")
+# 稿件定位：优先脚本同目录（云端仓库 analysis/ 布局），回落 本地 稿件/ 目录
+MD = os.environ.get("MD_PATH") or next(
+    p for p in [os.path.join(os.path.dirname(os.path.abspath(__file__)), "manuscript_gse31210.md"),
+                os.path.join(BASE, "稿件", "manuscript_gse31210.md")]
+    if os.path.exists(p))
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "export")
 os.makedirs(OUT, exist_ok=True)
 FIGDIR = os.environ.get("FIG_DIR", os.path.join(BASE, "figures"))
