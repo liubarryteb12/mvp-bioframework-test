@@ -199,6 +199,7 @@ L("U04_预后集", {"n": len(ev), "事件": int(ev.sum())}, "排除后 RFS 分�
 
 skf = StratifiedKFold(n_splits=NSPLITS, shuffle=True, random_state=SEED)
 oof = np.full(len(ev), np.nan); oof_base = np.full(len(ev), np.nan)
+oof_proba = np.full(len(ev), np.nan)   # 校准/DCA 用概率（H-1：CV 预测概率口径）
 fold_auc, fallback_folds, screen_sizes = [], [], []
 for tr, te in skf.split(Xi, ev):
     Xtr = Xi[tr]                       # 全探针行（列号即真实探针下标）
@@ -223,6 +224,7 @@ for tr, te in skf.split(Xi, ev):
     clf = LogisticRegression(C=C_L2, max_iter=2000, random_state=SEED)
     clf.fit((Xtr[:, feats] - mu) / sd, ev[tr])
     oof[te] = clf.decision_function((Xi[np.ix_(te, feats)] - mu) / sd)
+    oof_proba[te] = clf.predict_proba((Xi[np.ix_(te, feats)] - mu) / sd)[:, 1]
     # 基线：年龄+性别+分期
     def base_mat(rows):
         a = pi["age"].values[rows]; s = (pi["sex"].values[rows] == "male").astype(float)
@@ -254,9 +256,10 @@ L("T31_无泄露", {"折内初筛显著数(均)": int(np.mean(screen_sizes)), "�
   "生存初筛与特征选择均在训练折内完成，结局信息未出折")
 L("T13a_校准限定", "CV 预测概率口径（decision_function 排序等价），训练内恒 1 现象不适用于正则化 logistic", "H-1")
 
-# OOF 评分表落盘（KM/ROC 图与台账复用）
-pd.DataFrame({"sample": pi.index, "score_oof": oof, "score_base": oof_base, "event": ev,
-              "rfs_days": tt, "stage": pi["stage"].values, "sex": pi["sex"].values,
+# OOF 评分表落盘（KM/ROC/校准/DCA 图与台账复用）
+pd.DataFrame({"sample": pi.index, "score_oof": oof, "proba_oof": oof_proba,
+              "score_base": oof_base, "event": ev, "rfs_days": tt,
+              "stage": pi["stage"].values, "sex": pi["sex"].values,
               "age": pi["age"].values}).to_csv(
     os.path.join(RES, "T12_OOF评分表.csv"), index=False, encoding="utf-8-sig")
 
@@ -273,6 +276,123 @@ c2, pkm = logrank(tt, ev, g)
 L("T06_KM", {"logrank_chi2": round(c2, 2), "P": pkm,
              "高分组n": int(g.sum()), "低分组n": int(len(g) - g.sum())},
   "OOF 风险评分中位分割（模仿 Wen 的 KM 展示）")
+
+# ---------- U04 扩展：签名持久化（全量重拟，同折内协议；供外部验证应用） ----------
+chis_f, ps_f = [], []
+for j in deg_cols:
+    x = Xi[:, j]
+    c2f, pf = logrank(tt, ev, (x > np.median(x)).astype(int))
+    chis_f.append(c2f); ps_f.append(pf)
+chis_f = np.asarray(chis_f); q_f = bh(ps_f)
+use_f = np.where(q_f < SCREEN_FDR)[0]
+order_f = np.argsort(-chis_f[use_f])[:TOPK]
+feats_full = deg_cols[use_f[order_f]]
+mu_f, sd_f = Xi[:, feats_full].mean(0), Xi[:, feats_full].std(0) + 1e-9
+clf_full = LogisticRegression(C=C_L2, max_iter=2000, random_state=SEED)
+clf_full.fit((Xi[:, feats_full] - mu_f) / sd_f, ev)
+json.dump({"protocol": "折内χ²top200 + L2 logistic(C=0.1)；此处为全量重拟，仅供外部验证应用",
+           "效能主张以折外 T12 为准": True, "seed": SEED,
+           "features": [expr.index[c] for c in feats_full],
+           "coef": clf_full.coef_[0].tolist(),
+           "mu": mu_f.tolist(), "sd": sd_f.tolist()},
+          open(os.path.join(RES, "T31_签名包.json"), "w", encoding="utf-8"),
+          ensure_ascii=False)
+L("U04_签名持久化", {"特征数": int(len(feats_full)), "文件": "results/T31_签名包.json"},
+  "外部验证（GSE68465 等）应用的前置；注意：签名包模型系数不得回填本队列表效")
+
+# ---------- T13b 校准（OOF 概率，CV 预测概率口径 H-1） ----------
+lr_cal = LogisticRegression(C=1e6, max_iter=2000, random_state=SEED)
+lr_cal.fit(oof_proba.reshape(-1, 1), ev)
+slope = float(lr_cal.coef_[0][0]); icept = float(lr_cal.intercept_[0])
+bs = []
+rng_c = np.random.default_rng(SEED)
+for _ in range(NBOOT):
+    ii = rng_c.integers(0, len(ev), len(ev))
+    if len(set(ev[ii])) < 2:
+        continue
+    lr_b = LogisticRegression(C=1e6, max_iter=2000, random_state=SEED)
+    lr_b.fit(oof_proba[ii].reshape(-1, 1), ev[ii])
+    bs.append((float(lr_b.coef_[0][0]), float(lr_b.intercept_[0])))
+slo = [b[0] for b in bs]; ice = [b[1] for b in bs]
+L("T13b_校准", {"校准斜率": round(slope, 3), "截距": round(icept, 3),
+              "斜率CI95": [round(np.percentile(slo, 2.5), 3), round(np.percentile(slo, 97.5), 3)],
+              "截距CI95": [round(np.percentile(ice, 2.5), 3), round(np.percentile(ice, 97.5), 3)]},
+  "OOF 概率逻辑再校准；理想斜率 1 / 截距 0")
+cal_tab = pd.DataFrame({"p": oof_proba, "y": ev}).assign(
+    dec=pd.qcut(oof_proba, 5, duplicates="drop")).groupby(
+    "dec", observed=True).agg(n=("y", "size"), p_mean=("p", "mean"),
+                              obs_rate=("y", "mean")).reset_index(drop=True)
+cal_tab.to_csv(os.path.join(RES, "T13b_校准分位.csv"), index=False, encoding="utf-8-sig")
+
+# ---------- T13c 决策曲线（5 年复发界时；删失早于界时且未复发者 GVH 排除，口径如实） ----------
+HZ = 1825
+m5 = (tt >= HZ) | ((ev == 1) & (tt <= HZ))
+y5 = ((tt <= HZ) & (ev == 1)).astype(int).astype(int)[m5]
+p5 = oof_proba[m5]
+dca_rows = []
+for pt in np.arange(0.05, 0.51, 0.05):
+    tp = float(((p5 >= pt) & (y5 == 1)).sum()); fp = float(((p5 >= pt) & (y5 == 0)).sum())
+    nb_m = (tp - fp * pt / (1 - pt)) / len(y5)
+    nb_a = (y5.sum() - (len(y5) - y5.sum()) * pt / (1 - pt)) / len(y5)
+    dca_rows.append({"threshold": round(float(pt), 2), "NB_model": round(nb_m, 4),
+                     "NB_all": round(nb_a, 4), "NB_none": 0.0})
+dca = pd.DataFrame(dca_rows)
+dca.to_csv(os.path.join(RES, "T13c_DCA曲线.csv"), index=False, encoding="utf-8-sig")
+neg_run = mx = 0
+for nb in dca["NB_model"]:
+    mx = max(mx, nb)
+    neg_run = neg_run + 1 if nb < 0 else 0
+verdict = "阻断" if neg_run >= 12 else ("警告" if neg_run >= 8 else "通过")
+L("T13c_DCA", {"5年内复发n": int(y5.sum()), "纳入n": int(m5.sum()),
+              "连续负点": neg_run, "双阈值判定": verdict, "最大净获益": round(mx, 4)},
+  "GVH 排除口径；双阈值 8 警告 / 12 阻断（T13c）")
+
+# ---------- T12 扩展：时间依赖 AUC（IPCW，5 年）+ Uno C（10 年） ----------
+def km_censor_tab(t_, e_):
+    """删失分布 G(t)：把删失当'事件'做 KM。"""
+    tab = {}; S = 1.0
+    for tt_ in np.unique(t_):
+        n_r = (t_ >= tt_).sum(); c_n = ((t_ == tt_) & (e_ == 0)).sum()
+        S *= (1 - c_n / n_r) if n_r > 0 else 1.0
+        tab[tt_] = S
+    return tab
+
+
+def Gh(tq, tab):
+    ks = [k for k in sorted(tab) if k <= tq]
+    return tab[ks[-1]] if ks else 1.0
+
+
+Gtab = km_censor_tab(tt, 1 - ev)
+tau5 = 1825
+cases5 = np.where((tt <= tau5) & (ev == 1))[0]
+ctrl5 = np.where(tt > tau5)[0]
+auc5 = None
+if len(cases5) and len(ctrl5):
+    num = den = 0.0
+    for i in cases5:
+        w = 1.0 / max(Gh(tt[i], Gtab), 1e-6)
+        for j in ctrl5:
+            num += w * (1.0 if oof_proba[i] > oof_proba[j]
+                        else 0.5 if oof_proba[i] == oof_proba[j] else 0.0)
+            den += w
+    auc5 = num / den if den else None
+tauC = 3650
+num = den = 0.0
+n = len(ev)
+for i in range(n):
+    if ev[i] != 1 or tt[i] > tauC or tt[i] <= 0:
+        continue
+    w2 = 1.0 / max(Gh(tt[i], Gtab), 1e-6) ** 2
+    for j in range(n):
+        if tt[j] > tt[i]:
+            den += w2
+            num += w2 * (1.0 if oof_proba[i] > oof_proba[j]
+                         else 0.5 if oof_proba[i] == oof_proba[j] else 0.0)
+unoC = num / den if den else None
+L("T12_时间依赖", {"AUC_5y_IPCW": round(auc5, 4) if auc5 else None,
+                 "UnoC_10y": round(unoC, 4) if unoC else None},
+  "IPCW（删失 KM 加权）；与折外 AUC 0.832（全随访二分类口径）互补")
 
 # ---------- U05 敏感性 ----------
 print("=" * 70, "\nU05 敏感性", sep="")
@@ -297,7 +417,8 @@ if len(hrs) == 2:
 anchors = {}
 an = 0
 for k in ["T02_DEG", "T04_富集", "T12_CV_AUC", "T31_无泄露", "T06_Cox_评分", "T06_KM",
-          "T18_敏感性_亚组", "H5_8C_异质性", "U04_预后集", "U04_EPV"]:
+          "T18_敏感性_亚组", "H5_8C_异质性", "U04_预后集", "U04_EPV",
+          "T13b_校准", "T13c_DCA", "T12_时间依赖", "U04_签名持久化"]:
     if k in R:
         an += 1; anchors[f"L-{an:03d}"] = {"key": k, **R[k]}
 R["_anchors"] = anchors

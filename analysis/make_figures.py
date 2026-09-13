@@ -129,4 +129,34 @@ ax.legend(frameon=False, loc="lower right", fontsize=7.5)
 ax.set_title("Relapse prediction, 5-fold CV (out-of-fold)", fontsize=9)
 save(fig, "04_performance_roc_cv")
 
+# ---------- 图5 校准曲线（performance，补充材料） ----------
+cal_p = os.path.join(RES, "T13b_校准分位.csv")
+if os.path.exists(cal_p):
+    cal = pd.read_csv(cal_p)
+    fig, ax = plt.subplots(figsize=(3.8, 3.6))
+    ax.scatter(cal["p_mean"], cal["obs_rate"], s=30, c=VERM, zorder=3)
+    ax.plot([0, 1], [0, 1], c=GREY, lw=0.8, ls=":")
+    ax.set_xlabel("Predicted probability (out-of-fold)")
+    ax.set_ylabel("Observed relapse rate")
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+    ax.set_title("Calibration, quintiles of OOF risk", fontsize=9)
+    save(fig, "05_performance_calibration_curve")
+else:
+    print("图5 跳过：缺 T13b_校准分位.csv")
+
+# ---------- 图6 决策曲线（dca，补充材料） ----------
+dca_p = os.path.join(RES, "T13c_DCA曲线.csv")
+if os.path.exists(dca_p):
+    dc = pd.read_csv(dca_p)
+    fig, ax = plt.subplots(figsize=(3.8, 3.6))
+    ax.plot(dc["threshold"], dc["NB_model"], c=VERM, lw=1.4, label="Risk score")
+    ax.plot(dc["threshold"], dc["NB_all"], c=BLUE, lw=1.2, ls="--", label="Treat all")
+    ax.axhline(0, c=GREY, lw=0.8, ls=":", label="Treat none")
+    ax.set_xlabel("Threshold probability"); ax.set_ylabel("Net benefit")
+    ax.legend(frameon=False, fontsize=7.5)
+    ax.set_title("Decision curve, 5-year relapse (GVH)", fontsize=9)
+    save(fig, "06_dca_net_benefit")
+else:
+    print("图6 跳过：缺 T13c_DCA曲线.csv")
+
 print("全部图件完成 →", FIG)
