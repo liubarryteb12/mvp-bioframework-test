@@ -172,6 +172,8 @@ jobs:
           python make_figures.py 2>&1 | tee figures_stdout.txt
           echo "EXIT=${PIPESTATUS[0]}"
           python gen_ledger.py
+          python claim_support_audit.py 2>&1 | tee claim_audit_stdout.txt
+          echo "CLAIM_AUDIT_EXIT=${PIPESTATUS[0]}   # 0=结论全部被结果支撑（用户硬要求）"
           python export_manuscript.py 2>&1 | tee export_stdout.txt
           echo "EXIT=${PIPESTATUS[0]}"
           python ../crossval/scripts/export_guard.py \
@@ -203,6 +205,7 @@ jobs:
             analysis/export_guard_stdout.txt
             analysis/writing_guard_stdout.txt
             analysis/layout_check_stdout.txt
+            analysis/claim_audit_stdout.txt
           retention-days: 30
 
   realdata-preflight:
