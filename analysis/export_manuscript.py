@@ -207,7 +207,35 @@ for sec in body_order:
 add_declarations_doc(docC)
 add_refs_doc(docC)
 docC.save(os.path.join(OUT, "manuscript_完整版.docx"))
-print("完整版 docx 已生成（PDF 由 workflow 用 LibreOffice 转换，字体真嵌入）")
+print("完整版 docx 已生成")
+
+# ---------- PDF：SCI 预印本排版引擎（内化自 09.SCI文章排版参考 的规范） ----------
+import typeset_engine as TE
+
+figtitles = {}
+for p in paras["图题"]:
+    m = re.match(r"^图\s*(\d+)\s*[：:]\s*(.*)$", p)
+    if m:
+        figtitles[int(m.group(1))] = m.group(2).strip()
+abs_html = P1 + "<br/>" + "<br/>".join(f"<b>{k}：</b>{v}" for k, v in abs_blocks)
+from reportlab.lib.units import inch as _inch
+figs_payload = [{"id": f"图 {n}", "title": figtitles.get(n, ""),
+                 "legend": captions[n].split("：", 1)[1],
+                 "path": FIGS[n],
+                 "width": min(fig_width_in(n), 5.0) * _inch}   # 自然尺寸，只缩不放大
+                for n in sorted(captions)]
+TE.compile_manuscript_pdf(
+    os.path.join(OUT, "manuscript_gse31210.pdf"),
+    {"title": title,
+     "authors": "作者信息（投稿前补全） · 单位，城市，国家 · 通讯作者：姓名，邮箱",
+     "running_header": f"PREPRINT MANUSCRIPT DRAFT  |  {title}",
+     "abstract": abs_html, "keywords": KEYWORDS.split("：", 1)[1],
+     "sections": [{"heading": f"{i}. {sec}",
+                   "paragraphs": paras[sec],
+                   **({"figures": [f for f in figs_payload]} if sec == "结果" else {})}
+                  for i, sec in enumerate(body_order, 1)],
+     "declarations": DECL_SUBS,
+     "references": paras["参考文献"]})
 
 print("导出完成 →", OUT)
 for f in sorted(os.listdir(OUT)):
