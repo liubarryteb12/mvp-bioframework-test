@@ -112,6 +112,7 @@ for name, txt in (("docA", docA), ("docB", docB), ("docP", docP)):
 
 # ---------- 真 docx：编辑版（A，BMC 式版式） ----------
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
 
 
@@ -155,12 +156,29 @@ add_declarations_doc(docA_real)
 add_refs_doc(docA_real)
 docA_real.save(os.path.join(OUT, "manuscript_编辑版.docx"))
 
+# ---------- 图件嵌入尺寸（排版纠错：只缩不放大，保 300dpi 有效分辨率） ----------
+# 教训：曾硬编码 6.3in 宽，3.6–3.9in 的原图被放大 1.6–1.7 倍，有效 dpi 跌破 300（违反作图规范）
+from PIL import Image as PILImage
+
+
+def fig_width_in(n, max_in=6.3):
+    with open(FIGS[n], "rb") as f:
+        im = PILImage.open(io.BytesIO(f.read()))
+    return min(im.size[0] / 300.0, max_in)   # 300dpi 自然尺寸；超宽才缩
+
+
 # ---------- 真 docx：排版核对版（B，纯图片+图注） ----------
 docB_real = Document()
 docB_real.add_heading(title + " · 排版核对版", 0)
 for n in sorted(captions):
-    docB_real.add_picture(FIGS[n], width=Inches(6.3))
-    docB_real.add_paragraph(captions[n])
+    pic_p = docB_real.add_paragraph()
+    pic_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pic_p.paragraph_format.keep_with_next = True   # 图与图注绑定，防跨页错位
+    pic_p.add_picture(FIGS[n], width=Inches(fig_width_in(n)))
+    cap_p = docB_real.add_paragraph()
+    cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = cap_p.add_run(f"图 {n}"); r.bold = True
+    cap_p.add_run("：" + captions[n].split("：", 1)[1])
 docB_real.add_heading("参考文献", level=2)
 for p in paras["参考文献"]:
     docB_real.add_paragraph(p)
@@ -172,7 +190,8 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, KeepTogether
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.utils import ImageReader
 
 pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))  # 内置 CID 中文字体，免字体文件
@@ -181,7 +200,7 @@ st_h = ParagraphStyle("h", fontName="STSong-Light", fontSize=12, leading=16,
                       spaceBefore=10, spaceAfter=4)
 st_b = ParagraphStyle("b", fontName="STSong-Light", fontSize=10.5, leading=16, firstLineIndent=21)
 st_cap = ParagraphStyle("c", fontName="STSong-Light", fontSize=8.5, leading=12,
-                        textColor="#444444", spaceAfter=6)
+                        textColor="#444444", spaceAfter=6, alignment=TA_CENTER)
 
 pdf = SimpleDocTemplate(os.path.join(OUT, "manuscript_gse31210.pdf"), pagesize=A4,
                         title=title, author="GSE31210 workflow")
@@ -189,7 +208,6 @@ st_sub = ParagraphStyle("sub", fontName="STSong-Light", fontSize=11, leading=15,
                         spaceBefore=6, spaceAfter=3)   # BMC 式摘要/声明子标题
 st_ph = ParagraphStyle("ph", fontName="STSong-Light", fontSize=9.5, leading=14,
                        textColor="#555555")
-img_w = 150 * mm
 story = [Paragraph(title, st_title)]
 for p in TITLE_PAGE[1:]:
     story.append(Paragraph(p, st_ph))
@@ -199,7 +217,11 @@ for k, v in abs_blocks:
     story.append(Paragraph(k, st_sub))
     story.append(Paragraph(v, st_b))
 story.append(Paragraph(KEYWORDS, st_ph))
+skip = False
 for i, x in enumerate(body_lines):
+    if skip:
+        skip = False
+        continue
     if re.match(r"^(引言|方法|结果|讨论)\n?$", x):
         story.append(Paragraph(x.strip(), st_h)); continue
     if re.match(r"^图\s*\d+：", x):
@@ -209,9 +231,12 @@ for i, x in enumerate(body_lines):
     if m and int(m.group(1)) in captions and i + 1 < len(body_lines) \
             and body_lines[i + 1].startswith(f"图 {int(m.group(1))}"):
         n = int(m.group(1))
+        w = fig_width_in(n, max_in=150 / 25.4) * mm   # 自然尺寸，只缩不放大
         ir = ImageReader(FIGS[n]); iw, ih = ir.getSize()
         story.append(Spacer(1, 4))
-        story.append(Image(FIGS[n], width=img_w, height=img_w * ih / iw))
+        story.append(KeepTogether([Image(FIGS[n], width=w, height=w * ih / iw),
+                                   Paragraph(captions[n], st_cap)]))
+        skip = True   # 图注已随图绑定，跳过下一轮的重复渲染
 story.append(Paragraph("声明（Declarations）", st_h))
 for k, p in DECL_SUBS:
     story.append(Paragraph(k, st_sub))
