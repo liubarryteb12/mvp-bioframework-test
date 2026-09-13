@@ -243,6 +243,25 @@ def test_m19_extract_baseline_handles_statsmodels_list_attribute():
     assert 0 < s_t0 <= 1.0, "lp=0 时 S0 应在 (0,1]"
 
 
+def test_m19_extract_baseline_orders_time_hazard_correctly():
+    """回归：statsmodels 三元组顺序为 (time, hazard, survival)，曾误取反导致 H0 读到时间值
+    （H0(1825d)=2282，run 34768479253 实证）。锁定顺序。"""
+    from statsmodels.duration.hazard_regression import PHReg
+    rng = np.random.default_rng(5)
+    n = 200
+    X = pd.DataFrame(rng.normal(size=(n, 2)), columns=["a", "b"])
+    tt = rng.exponential(size=n) + 1.0
+    ev = (rng.uniform(size=n) > 0.3).astype(int)
+    cox = PHReg(tt, X.to_numpy(float), status=ev).fit()
+    m19 = _load_plugin("m19_nomogram.py")
+    times, bh = m19.extract_baseline(cox)
+    raw = cox.baseline_cumulative_hazard[0]   # 三元组 (time, hazard, survival)
+    assert np.allclose(times, np.asarray(raw[0]).ravel()), "times 应为三元组第 1 个"
+    assert np.allclose(bh, np.asarray(raw[1]).ravel()), "cumhaz 应为三元组第 2 个（hazard）"
+    surv = np.asarray(raw[2]).ravel()
+    assert np.allclose(surv, np.exp(-bh)), "S0 = exp(-H0) 必须成立（锁定列顺序）"
+
+
 def test_m19_run_end_to_end(tmp_path):
     """端到端冒烟：合成数据跑通 run()，产出 Cox 表 / 列线图 / RFS 换算表。"""
     m19 = _load_plugin("m19_nomogram.py")
