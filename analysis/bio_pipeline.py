@@ -291,16 +291,32 @@ def m11(ctx, out):
             cands[nm] = v
     for nm, df in cands.items():          # 原始表全留，供复核
         df.to_csv(os.path.join(out, f"ssGSEA_{nm}_raw.csv"), encoding="utf-8-sig")
+    sset = set(map(str, samples))
     chosen = None
-    for nm, df in cands.items():          # 宽表判据：列名与样本 ID 重合过半
-        hit = len(set(map(str, df.columns)) & set(map(str, samples)))
-        if hit >= max(3, len(samples) // 2):
-            chosen = (nm, df); break
+    for nm, df in cands.items():
+        cols = set(map(str, df.columns))
+        # 情形①：宽表（列名即样本 ID）
+        if len(cols & sset) >= max(3, len(samples) // 2):
+            chosen = (nm, df, "宽表"); break
+        # 情形②：长表（Name/Term/ES/NES 之类）——哪一列的取值与样本 ID 重合过半即为样本列
+        if "NES" in cols:
+            for c in cols:
+                if df[c].dtype == object:
+                    hit = len(set(map(str, df[c])) & sset)
+                    if hit >= max(3, len(samples) // 2):
+                        other = [x for x in cols if x not in (c, "NES", "ES")]
+                        term_col = other[0] if other else None
+                        if term_col:
+                            wide = df.pivot_table(index=term_col, columns=c, values="NES")
+                            chosen = (nm, wide, f"长表转宽（样本列={c}，基因集列={term_col}）")
+                            break
+        if chosen:
+            break
     if chosen:
         chosen[1].to_csv(os.path.join(out, "ssGSEA_Hallmark_NES.csv"), encoding="utf-8-sig")
-        return (f"ssGSEA 宽表 {chosen[1].shape}（来源 {chosen[0]}；Hallmark；"
+        return (f"ssGSEA 评分表 {chosen[1].shape}（{chosen[2]}；来源 {chosen[0]}；Hallmark；"
                 f"ESTIMATE/CIBERSORT 近似口径，已标注）")
-    return (f"ssGSEA 已产出 raw 表 {[ (k, list(v.columns)) for k, v in cands.items() ]}；"
+    return (f"ssGSEA 已产出 raw 表 {[(k, list(v.columns)) for k, v in cands.items()]}；"
             f"宽表未识别，待复核（不假装成功）")
 
 
