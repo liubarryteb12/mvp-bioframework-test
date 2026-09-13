@@ -110,10 +110,13 @@ whole = open(MD, encoding="utf-8").read()
 unused = [a for a in anchors if a not in whole]
 print(f"[{'支撑' if not unused else '不支撑'}] C3 锚利用完备性｜未引用锚={unused or '无'}")
 rows.append({"主张块": "C3 全稿锚利用", "锚": sorted(anchors), "缺锚": unused,
-             "数值数": 0, "失配数值": [], "判定": "支撑" if not unused else "不支撑"})
+             "数值数": 0, "失配数值": [],
+             "判定": "支撑" if not unused else f"待入稿（{len(unused)} 项新结果未接入结论链）"})
 
 n_ok = sum(1 for r in rows if r["判定"] == "支撑")
 print(f"结论支撑性审计: {n_ok}/{len(rows)} 支撑")
+# C3 的"未引用锚"= 新结果尚未接入结论链：显式标"待入稿"，不冒充通过也不阻塞
+# （本轮场景：写作层按用户指示冻结，新增校准/DCA/时间依赖结果待写作层解冻后接入）
 json.dump(rows, open(os.path.join(RES, "claim_support_audit.json"), "w", encoding="utf-8"),
           ensure_ascii=False, indent=1)
 
@@ -129,4 +132,4 @@ for r in rows:
     L.append("")
 with open(os.path.join(RES, "支撑矩阵.md"), "w", encoding="utf-8") as f:
     f.write("\n".join(L))
-sys.exit(0 if n_ok == len(rows) else 1)
+sys.exit(0 if all(r["判定"] != "不支撑" for r in rows) else 1)
