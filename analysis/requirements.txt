@@ -8,6 +8,4 @@ pyyaml
 gseapy
 Pillow
 python-docx
-reportlab
-pymupdf
 pypdf

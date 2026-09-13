@@ -184,67 +184,31 @@ for p in paras["参考文献"]:
     docB_real.add_paragraph(p)
 docB_real.save(os.path.join(OUT, "manuscript_排版核对版.docx"))
 
-# ---------- 真 pdf：文图合一（P） ----------
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, KeepTogether
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.utils import ImageReader
-
-pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))  # 内置 CID 中文字体，免字体文件
-st_title = ParagraphStyle("t", fontName="STSong-Light", fontSize=15, leading=20, spaceAfter=8)
-st_h = ParagraphStyle("h", fontName="STSong-Light", fontSize=12, leading=16,
-                      spaceBefore=10, spaceAfter=4)
-st_b = ParagraphStyle("b", fontName="STSong-Light", fontSize=10.5, leading=16, firstLineIndent=21)
-st_cap = ParagraphStyle("c", fontName="STSong-Light", fontSize=8.5, leading=12,
-                        textColor="#444444", spaceAfter=6, alignment=TA_CENTER)
-
-pdf = SimpleDocTemplate(os.path.join(OUT, "manuscript_gse31210.pdf"), pagesize=A4,
-                        title=title, author="GSE31210 workflow")
-st_sub = ParagraphStyle("sub", fontName="STSong-Light", fontSize=11, leading=15,
-                        spaceBefore=6, spaceAfter=3)   # BMC 式摘要/声明子标题
-st_ph = ParagraphStyle("ph", fontName="STSong-Light", fontSize=9.5, leading=14,
-                       textColor="#555555")
-story = [Paragraph(title, st_title)]
+# ---------- 真 docx：完整版（BMC 式全稿：正文+图随文嵌+图注+声明+参考文献，一份装全） ----------
+docC = Document()
+docC.add_heading(title, 0)
 for p in TITLE_PAGE[1:]:
-    story.append(Paragraph(p, st_ph))
-story.append(Paragraph("摘要", st_h))
-story.append(Paragraph(P1, st_b))
-for k, v in abs_blocks:
-    story.append(Paragraph(k, st_sub))
-    story.append(Paragraph(v, st_b))
-story.append(Paragraph(KEYWORDS, st_ph))
-skip = False
-for i, x in enumerate(body_lines):
-    if skip:
-        skip = False
-        continue
-    if re.match(r"^(引言|方法|结果|讨论)\n?$", x):
-        story.append(Paragraph(x.strip(), st_h)); continue
-    if re.match(r"^图\s*\d+：", x):
-        story.append(Paragraph(x, st_cap)); continue
-    story.append(Paragraph(x.replace("\n", "<br/>"), st_b))
-    m = re.search(r"图\s*(\d+)", x)
-    if m and int(m.group(1)) in captions and i + 1 < len(body_lines) \
-            and body_lines[i + 1].startswith(f"图 {int(m.group(1))}"):
-        n = int(m.group(1))
-        w = fig_width_in(n, max_in=150 / 25.4) * mm   # 自然尺寸，只缩不放大
-        ir = ImageReader(FIGS[n]); iw, ih = ir.getSize()
-        story.append(Spacer(1, 4))
-        story.append(KeepTogether([Image(FIGS[n], width=w, height=w * ih / iw),
-                                   Paragraph(captions[n], st_cap)]))
-        skip = True   # 图注已随图绑定，跳过下一轮的重复渲染
-story.append(Paragraph("声明（Declarations）", st_h))
-for k, p in DECL_SUBS:
-    story.append(Paragraph(k, st_sub))
-    story.append(Paragraph(p, st_b))
-story.append(Paragraph("参考文献", st_h))
-for p in paras["参考文献"]:
-    story.append(Paragraph(p, st_b))
-pdf.build(story)
+    docC.add_paragraph(p)
+add_abstract_doc(docC)
+for sec in body_order:
+    docC.add_heading(sec, level=2)
+    for p in paras[sec]:
+        docC.add_paragraph(p)
+        for n, (s2, p2) in citing.items():
+            if s2 == sec and p2 == p:
+                pic_p = docC.add_paragraph()
+                pic_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                pic_p.paragraph_format.keep_with_next = True
+                pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n)))
+                cap_p = docC.add_paragraph()
+                cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                r = cap_p.add_run(f"图 {n}"); r.bold = True
+                cap_p.add_run("：" + captions[n].split("：", 1)[1])
+add_declarations_doc(docC)
+add_refs_doc(docC)
+docC.save(os.path.join(OUT, "manuscript_完整版.docx"))
+print("完整版 docx 已生成（PDF 由 workflow 用 LibreOffice 转换，字体真嵌入）")
+
 print("导出完成 →", OUT)
 for f in sorted(os.listdir(OUT)):
     print("  ", f, os.path.getsize(os.path.join(OUT, f)), "B")
