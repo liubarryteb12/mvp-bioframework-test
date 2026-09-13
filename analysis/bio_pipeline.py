@@ -284,15 +284,19 @@ def m11(ctx, out):
     dat = sub.loc[mad.sort_values(ascending=False).head(5000).index]
     e = gp.ssgsea(data=dat, gene_sets="MSigDB_Hallmark_2020", outdir=None,
                   no_plot=True, threads=4)
-    res2d = getattr(e, "res2d", None)
-    if res2d is None:
-        res2d = e.results
-    if {"Term", "Sample", "NES"} <= set(res2d.columns):
-        wide = res2d.pivot_table(index="Term", columns="Sample", values="NES")
+    res2d = getattr(e, "res2d", None) or e.results
+    cols = list(res2d.columns)
+    term_col = next((c for c in cols if str(c).lower() in ("term", "name", "geneset", "gene_set")), cols[0])
+    val_col = next((c for c in cols if "nes" in str(c).lower()), None)
+    samp_col = next((c for c in cols
+                     if c not in (term_col, val_col) and not pd.api.types.is_numeric_dtype(res2d[c])), None)
+    if samp_col and term_col:
+        wide = res2d.pivot_table(index=term_col, columns=samp_col, values=val_col)
     else:
         wide = res2d
     wide.to_csv(os.path.join(out, "ssGSEA_Hallmark_NES.csv"), encoding="utf-8-sig")
-    return f"ssGSEA 评分 {wide.shape[0]} 基因集 × {wide.shape[1]} 样本（Hallmark；ESTIMATE/CIBERSORT 近似口径，已标注）"
+    return (f"ssGSEA 评分 {wide.shape[0]} 基因集 × {wide.shape[1]} 样本"
+            f"（Hallmark；ESTIMATE/CIBERSORT 近似口径，已标注；原始列={cols}）")
 
 
 # ---------- M12 WGCNA-lite（软阈值共表达 + 层次聚类模块 + 模块-性状关联） ----------
@@ -350,6 +354,7 @@ def m13(ctx, out):
 @register("M15", "机器学习分类", "机器学习分类", ["M03"])
 def m15(ctx, out):
     from sklearn.ensemble import RandomForestClassifier
+    from sklearn.linear_model import LogisticRegression
     from sklearn.svm import SVC
     from sklearn.model_selection import StratifiedKFold, cross_val_predict
     from sklearn.metrics import roc_auc_score, f1_score
