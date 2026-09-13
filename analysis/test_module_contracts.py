@@ -211,6 +211,20 @@ def test_m18_corr_matrix_and_traits():
     assert np.isnan(miss["r"]), "有效配对不足时不得给出相关系数"
 
 
+def test_m18_collapses_duplicate_gene_symbols():
+    """回归：多探针→同一 Symbol 时索引重复，曾致 stack 报错（run 34762853449）。"""
+    m18 = _load_plugin("m18_correlation.py")
+    mat = pd.DataFrame([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+                       index=["p1", "p2", "p3"], columns=["S1", "S2"])
+    sym = {"p1": "G1", "p2": "G1", "p3": "G2"}
+    out, n_dup = m18.collapse_by_symbol(mat, sym)
+    assert n_dup == 1 and list(out.index) == ["G1", "G2"]
+    assert out.loc["G1", "S1"] == 3.0, "同符号探针应取最大值"
+    assert len(out.index) == len(set(out.index)), "聚合后索引必须唯一"
+    out2, n2 = m18.collapse_by_symbol(mat, {})
+    assert n2 == 0 and out2.equals(mat), "无注释时应原样返回"
+
+
 def test_m19_nomogram_scaling_and_survival():
     m19 = _load_plugin("m19_nomogram.py")
     coefs = {"a": 1.0, "b": 2.0, "c": 3.0}

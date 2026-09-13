@@ -20,6 +20,20 @@ def _field(meta, sample, prefix):
     return vals[0] if vals else None
 
 
+def collapse_by_symbol(mat, sym):
+    """按基因符号聚合探针（同符号取最大值），返回 (聚合后矩阵, 合并掉的探针数)。
+
+    为什么必须做：GPL570 上多个探针常映射到同一 Symbol，直接 rename 会让相关矩阵
+    索引重复，`stack()` 抛 "Columns with duplicate values are not supported"
+    （本轮 run 34762853449 实证；契约测试 test_m18_collapses_duplicate_gene_symbols 锁死）。
+    """
+    if not sym:
+        return mat, 0
+    names = [sym.get(i, i) for i in mat.index]
+    n_dup = len(names) - len(set(names))
+    return (mat.groupby(names).max() if n_dup else mat), n_dup
+
+
 def corr_matrix(mat):
     """基因 × 基因 Pearson 相关矩阵（纯函数）。mat: 基因 × 样本。"""
     r = np.corrcoef(mat.to_numpy(dtype=float))
@@ -79,7 +93,7 @@ def run(ctx, out):
 
     sym = ctx.get("probe2sym") or {}
     mat = expr.loc[probes, keep]
-    mat = mat.rename(index=lambda i: sym.get(i, i))
+    mat, n_dup = collapse_by_symbol(mat, sym)      # 多探针同符号必须聚合（见函数说明）
 
     cm = corr_matrix(mat)
     cm.to_csv(os.path.join(out, "M18_相关矩阵.csv"), encoding="utf-8-sig")
@@ -116,7 +130,7 @@ def run(ctx, out):
     plt.close(fig)
 
     sig = int((ct["FDR"] < 0.05).sum()) if len(ct) else 0
-    return (f"基因 {len(mat)} 个；高相关对（|r|≥{min_abs_r}）{len(hi)}；"
+    return (f"基因 {len(mat)} 个（合并重复符号探针 {n_dup}）；高相关对（|r|≥{min_abs_r}）{len(hi)}；"
             f"基因-临床显著项（FDR<0.05）{sig}")
 
 
