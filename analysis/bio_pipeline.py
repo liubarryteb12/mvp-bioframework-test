@@ -284,7 +284,9 @@ def m11(ctx, out):
     dat = sub.loc[mad.sort_values(ascending=False).head(5000).index]
     e = gp.ssgsea(data=dat, gene_sets="MSigDB_Hallmark_2020", outdir=None,
                   no_plot=True, threads=4)
-    res2d = getattr(e, "res2d", None) or e.results
+    res2d = getattr(e, "res2d", None)   # 不可写 `x or y`：DataFrame 的 or 会触发真值歧义
+    if res2d is None:
+        res2d = e.results
     cols = list(res2d.columns)
     term_col = next((c for c in cols if str(c).lower() in ("term", "name", "geneset", "gene_set")), cols[0])
     val_col = next((c for c in cols if "nes" in str(c).lower()), None)
