@@ -174,7 +174,7 @@ for n in sorted(captions):
     pic_p = docB_real.add_paragraph()
     pic_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pic_p.paragraph_format.keep_with_next = True   # 图与图注绑定，防跨页错位
-    pic_p.add_picture(FIGS[n], width=Inches(fig_width_in(n)))
+    pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n)))
     cap_p = docB_real.add_paragraph()
     cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = cap_p.add_run(f"图 {n}"); r.bold = True
