@@ -18,7 +18,15 @@ MD = os.environ.get("MD_PATH") or next(
                 os.path.join(BASE, "稿件", "manuscript_gse31210.md")] if os.path.exists(p))
 
 R = json.load(open(os.path.join(RES, "results.json"), encoding="utf-8"))
-anchors = R["_anchors"]
+anchors = dict(R["_anchors"])
+# L-010 由 gen_ledger 从对照实验合成（不回写 results.json），审计器按同口径合并
+vp = os.path.join(RES, "variant_experiment.json")
+if os.path.exists(vp) and "L-010" not in anchors:
+    V0 = json.load(open(vp, encoding="utf-8"))
+    leak = {k: {"AUC": v0["AUC"], "HR": v0["HR"], "KM_P": v0["KM_P"]}
+            for k, v0 in V0.items() if isinstance(v0, dict) and "AUC" in v0}
+    anchors["L-010"] = {"key": "T31_泄露对照实验", "value": leak,
+                        "note": "全队列选择仅作 T31 教学对照，不得用于任何主张"}
 V = json.load(open(os.path.join(RES, "variant_experiment.json"), encoding="utf-8"))
 
 # ---------- 数值全集 ----------
