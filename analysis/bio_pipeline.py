@@ -284,21 +284,24 @@ def m11(ctx, out):
     dat = sub.loc[mad.sort_values(ascending=False).head(5000).index]
     e = gp.ssgsea(data=dat, gene_sets="MSigDB_Hallmark_2020", outdir=None,
                   no_plot=True, threads=4)
-    res2d = getattr(e, "res2d", None)   # 不可写 `x or y`：DataFrame 的 or 会触发真值歧义
-    if res2d is None:
-        res2d = e.results
-    cols = list(res2d.columns)
-    term_col = next((c for c in cols if str(c).lower() in ("term", "name", "geneset", "gene_set")), cols[0])
-    val_col = next((c for c in cols if "nes" in str(c).lower()), None)
-    samp_col = next((c for c in cols
-                     if c not in (term_col, val_col) and not pd.api.types.is_numeric_dtype(res2d[c])), None)
-    if samp_col and term_col:
-        wide = res2d.pivot_table(index=term_col, columns=samp_col, values=val_col)
-    else:
-        wide = res2d
-    wide.to_csv(os.path.join(out, "ssGSEA_Hallmark_NES.csv"), encoding="utf-8-sig")
-    return (f"ssGSEA 评分 {wide.shape[0]} 基因集 × {wide.shape[1]} 样本"
-            f"（Hallmark；ESTIMATE/CIBERSORT 近似口径，已标注；原始列={cols}）")
+    cands = {}
+    for nm in ("res2d", "results", "res"):
+        v = getattr(e, nm, None)
+        if isinstance(v, pd.DataFrame):
+            cands[nm] = v
+    for nm, df in cands.items():          # 原始表全留，供复核
+        df.to_csv(os.path.join(out, f"ssGSEA_{nm}_raw.csv"), encoding="utf-8-sig")
+    chosen = None
+    for nm, df in cands.items():          # 宽表判据：列名与样本 ID 重合过半
+        hit = len(set(map(str, df.columns)) & set(map(str, samples)))
+        if hit >= max(3, len(samples) // 2):
+            chosen = (nm, df); break
+    if chosen:
+        chosen[1].to_csv(os.path.join(out, "ssGSEA_Hallmark_NES.csv"), encoding="utf-8-sig")
+        return (f"ssGSEA 宽表 {chosen[1].shape}（来源 {chosen[0]}；Hallmark；"
+                f"ESTIMATE/CIBERSORT 近似口径，已标注）")
+    return (f"ssGSEA 已产出 raw 表 {[ (k, list(v.columns)) for k, v in cands.items() ]}；"
+            f"宽表未识别，待复核（不假装成功）")
 
 
 # ---------- M12 WGCNA-lite（软阈值共表达 + 层次聚类模块 + 模块-性状关联） ----------
