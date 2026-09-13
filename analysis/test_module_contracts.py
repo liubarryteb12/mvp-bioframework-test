@@ -223,6 +223,47 @@ def test_m19_covariates_are_configurable_and_numeric():
     assert X2.loc["S1", "stage_ord"] == pytest.approx(4.0), "分期映射应可跨数据集"
 
 
+def test_m19_extract_baseline_handles_statsmodels_list_attribute():
+    """回归：statsmodels baseline_cumulative_hazard 是 [H0,times,S0] 列表属性（非方法），
+    直接调用会抛 'list' object is not callable（run 34766532160 实证）。"""
+    from statsmodels.duration.hazard_regression import PHReg
+    rng = np.random.default_rng(3)
+    n = 150
+    X = pd.DataFrame(rng.normal(size=(n, 2)), columns=["a", "b"])
+    tt = rng.exponential(size=n) + 1.0
+    ev = (rng.uniform(size=n) > 0.3).astype(int)
+    cox = PHReg(tt, X.to_numpy(float), status=ev).fit()
+    m19 = _load_plugin("m19_nomogram.py")
+    times, bh = m19.extract_baseline(cox)
+    assert times.ndim == 1 and bh.ndim == 1 and len(times) == len(bh) and len(times) > 0
+    assert np.all(np.diff(bh) >= -1e-9), "基线累积风险应单调非降"
+    t0 = float(np.median(times))
+    assert m19.baseline_at(times, bh, t0) >= 0
+    s_t0 = m19.surv_prob(m19.baseline_at(times, bh, t0), 0.0)
+    assert 0 < s_t0 <= 1.0, "lp=0 时 S0 应在 (0,1]"
+
+
+def test_m19_run_end_to_end(tmp_path):
+    """端到端冒烟：合成数据跑通 run()，产出 Cox 表 / 列线图 / RFS 换算表。"""
+    m19 = _load_plugin("m19_nomogram.py")
+    rng = np.random.default_rng(7)
+    n = 120
+    meta = {f"S{i}": [f"age (years): {40 + int(rng.integers(0, 40))}",
+                      "gender: male" if rng.random() > 0.5 else "gender: female",
+                      "pathological stage: II"] for i in range(n)}
+    tt = rng.integers(100, 2000, size=n).astype(float)
+    ev = rng.integers(0, 2, size=n)
+    ctx = {"meta": meta, "keep": [f"S{i}" for i in range(n)],
+           "tt": tt, "ev": ev, "config": {}}
+    out = str(tmp_path / "m19")
+    os.makedirs(out, exist_ok=True)
+    msg = m19.run(ctx, out)
+    assert "n=" in msg, msg
+    for f in ("M19_Cox系数表.csv", "M19_列线图.png",
+              "M19_总分_1825天无复发生存.csv"):
+        assert os.path.exists(os.path.join(out, f)), f"缺失产出 {f}"
+
+
 def test_v2_method_plugins_are_registered():
     loaded = bp.load_plugins()
     for mid in ("M17", "M18", "M19", "M20"):

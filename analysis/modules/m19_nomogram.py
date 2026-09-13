@@ -69,6 +69,27 @@ def baseline_at(event_times, cumhaz, t0):
     return float(ch[idx]) if idx >= 0 else 0.0
 
 
+def extract_baseline(cox):
+    """取 Cox 基线累积风险曲线（兼容 statsmodels 版本差异，纯函数可测）。
+
+    实践证据：本环境 `baseline_cumulative_hazard` 是**非可调用属性** =
+    [H0, times, S0] 三个数组的列表（直接调用会抛 'list' object is not callable，
+    见 run 34766532160）。部分版本为方法。统一返回 (times, cumhaz)。
+    """
+    bc = cox.baseline_cumulative_hazard
+    res = bc() if callable(bc) else bc
+    if isinstance(res, list):
+        inner = res[0]
+        if isinstance(inner, list) and len(inner) >= 2:   # [[H0],[times],[S0]]
+            return np.asarray(inner[1]).ravel(), np.asarray(inner[0]).ravel()
+        inner = np.asarray(inner)
+        return np.arange(inner.size, dtype=float), inner.ravel()
+    arr = np.asarray(res)
+    if arr.ndim == 2 and arr.shape[1] >= 2:
+        return arr[:, 0].ravel(), arr[:, 1].ravel()
+    return np.arange(arr.size, dtype=float), arr.ravel()
+
+
 def _covariates(ctx, samples):
     """组装协变量表：年龄 / 男性 / 分期序数 / 可选上游评分。
 
@@ -122,9 +143,9 @@ def run(ctx, out):
     ranges = {c: (float(Xm[c].min()), float(Xm[c].max())) for c in Xm.columns}
     pts = points_per_unit(coefs, ranges)
 
-    # 基线累积风险：statsmodels 版本差异 → 先取曲线，再按事件时刻对齐（长度不一致则截断）
-    bh = np.asarray(cox.baseline_cumulative_hazard()).ravel()
-    et = np.sort(np.unique(np.asarray(ttm, dtype=float)[np.asarray(evm, dtype=int) == 1]))
+    # 基线累积风险：statsmodels 的 baseline_cumulative_hazard 是 [H0,times,S0] 列表属性
+    # （非方法，曾致 'list' not callable，run 34766532160 实证），统一由 extract_baseline 抽取
+    et, bh = extract_baseline(cox)
     h0 = baseline_at(et, bh, horizon_days)
 
     lp = Xm.to_numpy(dtype=float) @ np.asarray(list(coefs.values()))
