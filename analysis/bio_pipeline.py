@@ -76,7 +76,7 @@ def gf(meta, s, prefix):
 
 
 # ---------- M01 数据获取 ----------
-@register("M01", "数据获取", "1_数据获取", [])
+@register("M01", "数据获取", "数据获取", [])
 def m01(ctx, out):
     src = ctx["config"].get("data_path") or ""
     gse = ctx["config"].get("gse", "")
@@ -294,8 +294,9 @@ def main():
     commit = os.environ.get("GIT_COMMIT", "unknown")
     for i, mid in enumerate(cfg["modules"], 1):
         m = REG[mid]
-        out = os.path.join(run_dir, f"{i}_{m['folder'].split('_', 1)[1]}")
+        out = os.path.join(run_dir, f"{i}_{m['folder']}")
         os.makedirs(out, exist_ok=True)
+        ctx["config"] = {**cfg, **cfg.get("params", {}).get(mid, {})}
         json.dump({"module": mid, "name": m["name"], "git_commit": commit,
                    "params": cfg.get("params", {}).get(mid, {})},
                   open(os.path.join(out, "_模块信息.json"), "w", encoding="utf-8"),
