@@ -30,18 +30,23 @@ FIG = os.environ.get("FIG_DIR", os.path.join(BASE, "figures"))
 os.makedirs(FIG, exist_ok=True)
 
 # ── 栏宽网格（mm→in）────────────────────────────────────────────────────────
-COL1, COL2 = 89 / 25.4, 183 / 25.4           # 3.504 in / 7.205 in
+# 安全规格（09/02/出图要求 §0）：单栏 85、双栏 170mm（各家范围 85–90 / 170–190，取小值最安全）
+COL1, COL2 = 85 / 25.4, 170 / 25.4           # 3.346 in / 6.693 in
 H_SINGLE = 3.0                                # 单栏图统一高度（D6：同类图同尺寸）
-# ── 字号 / 线宽（作图规范区间）──────────────────────────────────────────────
-FS_MIN, FS_MAX = 5, 7
+# ── 字号 / 线宽（出图要求：正文文字 6–8pt、刻度 ≥6pt、分图标签 8–10pt 粗体）──
+FS_MIN, FS_MAX = 6, 8
 FS, FS_SMALL, FS_PANEL = 7, 6, 8              # 面板标记 8pt（规范单列）
 LW_MIN, LW_MAX = 0.25, 1.0
 LW, LW_THIN, LW_REF = 0.9, 0.6, 0.5           # 曲线 / 轴 / 辅助线
-# ── 色板 Wong 2011 ─────────────────────────────────────────────────────────
+# ── 色板 Wong 2011（= Okabe-Ito，色盲安全；出图要求 3.3）─────────────────────
 BLUE, VERM, GREY = "#0072B2", "#D55E00", "#999999"
 
 plt.rcParams.update({
-    "font.size": FS, "font.family": "DejaVu Sans",
+    # 出图要求 0/3.2：全篇图统一 Arial/Helvetica（Windows=Arial，云端=Liberation Sans
+    # 度量兼容，DejaVu 兜底希腊字母/箭头等）；不要 Times、不要中文字体
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Arial", "Liberation Sans", "Helvetica", "DejaVu Sans"],
+    "font.size": FS,
     "axes.titlesize": FS, "axes.labelsize": FS,
     "xtick.labelsize": FS_SMALL, "ytick.labelsize": FS_SMALL,
     "legend.fontsize": FS_SMALL,
@@ -144,10 +149,12 @@ def audit(fig, name):
 def save(fig, name):
     from PIL import Image
     issues = audit(fig, name)
-    for ext, kw in [("pdf", {}), ("tiff", {}), ("png", {}),
-                    ("jpg", dict(pil_kwargs={"quality": 95}))]:
+    # 出图要求：线条图+文字的位图须 ≥600 dpi（spec dpi.line_min；TIFF 用 LZW 压缩）
+    for ext, kw in [("pdf", {}), ("tiff", dict(pil_kwargs={"compression": "tiff_lzw"})),
+                    ("png", {}), ("jpg", dict(pil_kwargs={"quality": 95}))]:
+        dpi = 600 if ext == "tiff" else 300
         p = os.path.join(FIG, f"{name}.{ext}")
-        fig.savefig(p, dpi=300, **kw)                   # 不裁框：尺寸=栏宽网格（D6）
+        fig.savefig(p, dpi=dpi, **kw)                   # 不裁框：尺寸=栏宽网格（D6）
         if ext in ("png", "tiff"):                      # C-6 色彩模式：RGB（matplotlib 默认 RGBA）
             with open(p, "rb") as f:                    # 先读入内存，避免 PIL 句柄与写回冲突（曾致 Errno 22）
                 data = f.read()
@@ -156,7 +163,7 @@ def save(fig, name):
                 bg = Image.new("RGB", im.size, (255, 255, 255))
                 bg.paste(im, mask=im.split()[-1] if im.mode in ("RGBA", "LA") else None)
                 buf = io.BytesIO()
-                bg.save(buf, format="TIFF" if ext == "tiff" else "PNG", dpi=(300, 300))
+                bg.save(buf, format="TIFF" if ext == "tiff" else "PNG", dpi=(dpi, dpi))
                 tmp = p + ".tmp"
                 with open(tmp, "wb") as f:
                     f.write(buf.getvalue())
@@ -195,9 +202,15 @@ ax.axvline(0.585, ls="--", lw=LW_REF, c="k")
 ax.axvline(-0.585, ls="--", lw=LW_REF, c="k")
 ax.set_xlabel("log2 fold change (tumour vs normal)")
 ax.set_ylabel("-log10 P (Welch t-test)")
+# 出图要求：图内不得出现图题（图题/图注写在稿件正文里）——标题移入图注。
 # 注：T02_DEG.value 是 {'总数','上调','下调'} 字典，直接串进标题会渲染出超长文本
-#     （原缺陷 D2 源头）；此处只取队列样本数，DEG 计数已由图例承担。
-ax.set_title(f"Differential expression, GSE31210 (n = {R['U01_样本数']['value']['总']})")
+#     （原缺陷 D2 源头）；DEG 计数已由图例承担。
+# 出图要求 4.6：火山图须有关键基因标签；基因名斜体（3.2）。每侧取 -log10P 前 3 个。
+for _msk in (up, dn):
+    for _j, (_x, _r) in enumerate(d[_msk].nlargest(3, "-log10P").iterrows()):
+        ax.annotate(_r["symbol"], (_r["log2FC"], _r["-log10P"]),
+                    xytext=(0, 4 + 8 * (_j % 2)), textcoords="offset points",
+                    ha="center", fontsize=FS_SMALL, style="italic")
 legend_outside(ax, ncol=1)
 _audit_issues += save(fig, "01_deg_volcano")
 
@@ -213,8 +226,9 @@ try:
     labs = [wrap(t, 42) for t in sel["Term"]]
     ln = np.array([l.count("\n") + 1 for l in labs], float)
     ypos = np.concatenate([[0.0], np.cumsum(ln)])[:-1]   # 行 i 的起点 = 前 i 个标签占的总行数
-    # 图高随总行数自适应：正文区 ≥ 总行数 × 行高（1.5 倍 FS_SMALL），另留标题/图例余量
-    fig, ax = new_fig(COL2, max(3.3, float(ln.sum()) * FS_SMALL * 1.5 / 72 + 1.05))
+    # 图高随总行数自适应：行高取 2.0 倍 FS_SMALL（constrained_layout 会把标题/轴标/
+    # 轴外图例从图高中扣掉一大块固定余量，1.5 倍实测仍会叠压），另留 1.3in 版面余量
+    fig, ax = new_fig(COL2, max(3.3, float(ln.sum()) * FS_SMALL * 2.0 / 72 + 1.3))
     for grp, col in [("Up-regulated", VERM), ("Down-regulated", BLUE)]:
         s = (sel["grp"] == grp).to_numpy()
         ax.scatter(sel.loc[s, "Adjusted P-value"], ypos[s], s=26, c=col, linewidths=0,
@@ -224,7 +238,6 @@ try:
     ax.set_ylim(float(ypos[-1] + ln[-1]) - 0.35, -0.75)
     ax.set_xscale("log")
     ax.set_xlabel("Adjusted P-value (Benjamini–Hochberg)")
-    ax.set_title("GO/KEGG enrichment of differentially expressed genes (Enrichr)")
     legend_outside(ax, ncol=2)
     _audit_issues += save(fig, "02_enrichment_dotplot")
 except Exception as ex:
@@ -252,17 +265,35 @@ def km(t, e):
 med = k["score_oof"].median()
 hi = k[k["score_oof"] > med]; lo = k[k["score_oof"] <= med]
 p_km = R["T06_KM"]["value"]["P"]
-fig, ax = new_fig(COL1, H_SINGLE)
+cox = R["T06_Cox_评分"]["value"]
+# 出图要求 4.6：KM 曲线须含 log-rank P、HR (95% CI) 与风险人数表（number at risk）。
+# 曲线 + 风险表用上下双轴（sharex）；图题移入图注（图内不得出现图题）。
+fig, (ax, axt) = plt.subplots(2, 1, figsize=(COL1, 3.7), sharex=True,
+                              height_ratios=[3.0, 0.8], constrained_layout=True)
 for grp, c, lab in [(hi, VERM, f"High risk (n = {len(hi)}, events = {int(hi.event.sum())})"),
                     (lo, BLUE, f"Low risk (n = {len(lo)}, events = {int(lo.event.sum())})")]:
     T, S, L, H = km(grp["rfs_days"], grp["event"])
     ax.step(T, S, where="post", c=c, lw=LW, label=lab)
     ax.fill_between(T, L, H, step="post", alpha=0.15, color=c, linewidth=0)
-ax.set_xlabel("Days to relapse or censoring")
+ax.text(0.98, 0.04, f"Log-rank P = {p_km:.1e}\nHR = {cox['HR']:.3f}"
+        f" (95% CI {cox['CI95'][0]:.3f}\u2013{cox['CI95'][1]:.3f})",
+        transform=ax.transAxes, ha="right", va="bottom", fontsize=FS_SMALL)
 ax.set_ylabel("Relapse-free survival")
 ax.set_xlim(left=0); ax.set_ylim(0, 1.02)
-ax.set_title(f"Risk score (out-of-fold), log-rank P = {p_km:.1e}")
 legend_outside(ax, ncol=1)
+# 风险人数表：与横轴共享数据坐标，数字对齐在 4 个随访分位点
+tmax = int(k["rfs_days"].max()); rt = [0, tmax // 3, 2 * tmax // 3, tmax]
+ax.set_xticks(rt)
+axt.set_ylim(0, 3); axt.set_yticks([])
+for _sp in ("top", "right", "left"):
+    axt.spines[_sp].set_visible(False)
+axt.set_xlabel("Days to relapse or censoring")
+axt.text(0, 2.55, "No. at risk", fontsize=FS_SMALL, ha="left")
+for _y, (_g, _nm) in [(1.55, (hi, "High risk")), (0.55, (lo, "Low risk"))]:
+    axt.text(0, _y, _nm, fontsize=FS_SMALL, ha="left")
+    for _t in rt:
+        axt.text(_t, _y, str(int((_g["rfs_days"] >= _t).sum())),
+                 fontsize=FS_SMALL, ha="center")
 _audit_issues += save(fig, "03_survival_km_risk")
 
 # ---------- 图4 ROC（performance） ----------
@@ -276,7 +307,6 @@ ax.plot(fpr1, tpr1, c=VERM, lw=LW, label=f"Risk score (AUC = {a1:.3f})")
 ax.plot([0, 1], [0, 1], c=GREY, lw=LW_REF, ls=":")
 ax.set_xlabel("1 - specificity"); ax.set_ylabel("Sensitivity")
 ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.02, 1.02)
-ax.set_title("Relapse prediction, 5-fold CV (out-of-fold)")
 legend_outside(ax, ncol=1)
 _audit_issues += save(fig, "04_performance_roc_cv")
 
@@ -291,7 +321,6 @@ if os.path.exists(cal_p):
     ax.set_xlabel("Predicted probability (out-of-fold)")
     ax.set_ylabel("Observed relapse rate")
     ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-    ax.set_title("Calibration, quintiles of out-of-fold risk")
     legend_outside(ax, ncol=1)
     _audit_issues += save(fig, "05_performance_calibration_curve")
 else:
@@ -306,7 +335,6 @@ if os.path.exists(dca_p):
     ax.plot(dc["threshold"], dc["NB_all"], c=BLUE, lw=LW, ls="--", label="Treat all")
     ax.plot(dc["threshold"], dc["NB_model"], c=VERM, lw=LW, label="Risk score")
     ax.set_xlabel("Threshold probability"); ax.set_ylabel("Net benefit")
-    ax.set_title("Decision curve, 5-year relapse risk")
     legend_outside(ax, ncol=3)
     _audit_issues += save(fig, "06_dca_net_benefit")
 else:

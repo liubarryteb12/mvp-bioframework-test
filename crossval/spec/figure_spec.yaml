@@ -69,13 +69,13 @@ color_mode:
   original_research: RGB
   review: CMYK
 
-# ---------- A-5 尺寸 ----------
+# ---------- A-5 尺寸（2026-09-14 对齐 09/02 出图要求：安全规格取各刊范围小值）----------
 size:
-  single_col_max_mm: 89
-  double_col_max_mm: 183
+  single_col_max_mm: 85     # 各家 85–90，取 85 最安全
+  double_col_max_mm: 170    # 各家 170–190，取 170 最安全
   height_max_mm: 170
   linewidth_pt: [0.25, 1.0]
-  fontsize_pt: [5, 7]
+  fontsize_pt: [6, 8]       # 正文文字 6–8pt、刻度 ≥6pt（分图标签 8pt 见 panel_label_pt）
   panel_label_pt: 8
 
 # ---------- A-6 禁止项 ----------

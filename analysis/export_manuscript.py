@@ -118,7 +118,34 @@ for name, txt in (("docA", docA), ("docB", docB), ("docP", docP)):
 # ---------- 真 docx：编辑版（A，BMC 式版式） ----------
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, Cm
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
+
+
+def style_submission(doc):
+    """投稿"通用安全格式"（09/02 排版要求 §1，对三份 docx 生效）：
+    Times New Roman 12pt（中文宋体）+ **双倍行距** + A4 四周 2.5cm +
+    **全篇连续行号**（Nature/BMC/Wiley 均要求）+ 页脚页码（Word 域）+ 单栏左对齐。"""
+    st = doc.styles["Normal"]
+    st.font.name = "Times New Roman"
+    st.font.size = Pt(12)
+    st.element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
+    st.paragraph_format.line_spacing = 2.0          # 双倍行距（全篇）
+    st.paragraph_format.space_after = Pt(0)
+    sec = doc.sections[0]
+    sec.top_margin = sec.bottom_margin = sec.left_margin = sec.right_margin = Cm(2.5)
+    ln = OxmlElement("w:lnNumType")                  # 连续行号：Word 会按行渲染编号
+    ln.set(qn("w:countBy"), "1")
+    ln.set(qn("w:restart"), "continuous")
+    sec._sectPr.append(ln)
+    p = sec.footer.paragraphs[0]                     # 页脚页码（PAGE 域，Word 自动更新）
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    fld = OxmlElement("w:fldSimple")
+    fld.set(qn("w:instr"), r"PAGE \* MERGEFORMAT")
+    _r = OxmlElement("w:r"); _t = OxmlElement("w:t"); _t.text = "1"
+    _r.append(_t); fld.append(_r)
+    p._p.append(fld)
 
 
 def add_abstract_doc(doc):
@@ -153,6 +180,7 @@ def add_refs_doc(doc):
 
 
 docA_real = Document()
+style_submission(docA_real)
 docA_real.add_heading(title, 0)
 for p in TITLE_PAGE[1:]:
     docA_real.add_paragraph(p)
@@ -178,12 +206,12 @@ docA_real.save(os.path.join(OUT, "manuscript_编辑版.docx"))
 from PIL import Image as PILImage
 
 PAGE_W_PT = 595.276                                # A4 宽（pt）
-PDF_COL_W_IN = (PAGE_W_PT - 2 * 54) / 72.0         # 正文栏宽 = 171.9 mm = 6.767 in
-DOCX_COL_W_IN = 6.20                               # docx（A4/Letter + 常规页边距）保守栏宽
+MARGIN_PT = 2.5 * 28.3465                          # 2.5cm 页边距（排版要求 §1）
+COL_W_IN = (PAGE_W_PT - 2 * MARGIN_PT) / 72.0      # 版心宽 = 160 mm = 6.299 in
 
 
-def fig_width_in(n, max_in=PDF_COL_W_IN):
-    """按 300dpi 自然尺寸取宽；仅在超出栏宽时才缩（只缩不放大）。"""
+def fig_width_in(n, max_in=COL_W_IN):
+    """按 300dpi 自然尺寸取宽；仅在超出版心宽时才缩（只缩不放大）。"""
     with open(FIGS[n], "rb") as f:
         im = PILImage.open(io.BytesIO(f.read()))
     return min(im.size[0] / 300.0, max_in)
@@ -191,12 +219,13 @@ def fig_width_in(n, max_in=PDF_COL_W_IN):
 
 # ---------- 真 docx：排版核对版（B，纯图片+图注） ----------
 docB_real = Document()
+style_submission(docB_real)
 docB_real.add_heading(title + " · 排版核对版", 0)
 for n in sorted(captions):
     pic_p = docB_real.add_paragraph()
     pic_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pic_p.paragraph_format.keep_with_next = True   # 图与图注绑定，防跨页错位
-    pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n, DOCX_COL_W_IN)))
+    pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n, COL_W_IN)))
     cap_p = docB_real.add_paragraph()
     cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = cap_p.add_run(f"图 {n}"); r.bold = True
@@ -207,6 +236,7 @@ docB_real.save(os.path.join(OUT, "manuscript_排版核对版.docx"))
 
 # ---------- 真 docx：完整版（BMC 式全稿：正文+图随文嵌+图注+声明+参考文献，一份装全） ----------
 docC = Document()
+style_submission(docC)
 docC.add_heading(title, 0)
 for p in TITLE_PAGE[1:]:
     docC.add_paragraph(p)
@@ -220,7 +250,7 @@ for sec in body_order:
                 pic_p = docC.add_paragraph()
                 pic_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 pic_p.paragraph_format.keep_with_next = True
-                pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n, DOCX_COL_W_IN)))
+                pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n, COL_W_IN)))
                 cap_p = docC.add_paragraph()
                 cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 r = cap_p.add_run(f"图 {n}"); r.bold = True

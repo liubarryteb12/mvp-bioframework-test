@@ -30,6 +30,10 @@ from PIL import Image
 
 HEADER_TEXT = "PREPRINT MANUSCRIPT DRAFT"
 
+# 版面基线（09/02/排版要求 §1"通用安全格式"）：A4 四周 2.5cm、单栏、Times 12pt、
+# 双倍行距、左对齐（Elsevier："不要使用两端对齐"——与中文"字间空隙"反馈同源）、页码。
+MARGIN_PT = 2.5 * 28.3465          # 2.5 cm ≈ 70.87 pt
+
 
 def _mpl_ttf(name):
     """matplotlib 自带 TTF 路径（保证存在，作最后兜底；无 CJK 覆盖）。"""
@@ -254,7 +258,7 @@ class NumberedCanvas(canvas.Canvas):
         self.setFont(FONT, 8)
         self.setFillColor(colors.HexColor("#64748b"))
         page_w, page_h = A4
-        margin = 54
+        margin = MARGIN_PT
         if self._pageNumber > 1:
             self._draw_mixed(HEADER_TEXT, margin, page_h - 36, 8)
             self.setStrokeColor(colors.HexColor("#cbd5e1"))
@@ -278,44 +282,43 @@ def get_image_flowable(image_path, target_width=5.0 * inch):
 
 
 def setup_typography_styles():
-    """版式样式表（对齐常规 SCI 单栏版式，参照 07.参考文献 Wen 2022 / BMC Cancer）。
+    """版式样式表（**以 09.SCI文章出图与排版参考/02 的"通用安全格式"为最高依据**）。
 
-    三条硬规矩（前车之鉴均注明）：
-      ① `wordWrap="CJK"` 必开：否则中文整段被当成一个"长单词"，断行与对齐失控；
-      ② 正文**两端对齐**（TA_JUSTIFY）必须与 ① 配套 —— 无 CJK 断行的 justify 会把
-         余量塞进字间（用户 2026-09-14"字间空隙"的根因）；CJK 断行 + 两端对齐才是
-         中文期刊的标准做法；
-      ③ **衬线字体**（西文 Times/Liberation Serif、中文宋体）+ 黑色正文 —— 无衬线黑体
-         配浅灰字色是网页版式，不是 SCI 版式（用户 2026-09-14 第二轮反馈"不像 SCI"）。
+    该模板的硬性条款（覆盖此前所有局部判断）：
+      ① Times New Roman 12 pt + **双倍行距**（全篇含摘要/图注/参考文献）；
+      ② **左对齐，不要两端对齐**（Elsevier 明文；与中文"字间空隙"反馈同源）；
+      ③ `wordWrap="CJK"` 必开（否则中文整段被当成一个"长单词"，断行失控）；
+      ④ 衬线字体（西文 Times/Liberation Serif、中文宋体经 `_wrap()` 逐段承接）。
+    双倍行距 = 12pt 正文配 24pt 行距（leading）。
     """
     styles = getSampleStyleSheet()
     return {
         'DocTitle': ParagraphStyle('DocTitle', parent=styles['Normal'], fontName=FONTB,
-                                   fontSize=15, leading=21, textColor=colors.black,
-                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=8),
+                                   fontSize=13, leading=26, textColor=colors.black,
+                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=12),
         'DocAuthors': ParagraphStyle('DocAuthors', parent=styles['Normal'], fontName=FONT,
-                                     fontSize=10, leading=14, textColor=colors.black,
-                                     alignment=TA_LEFT, wordWrap='CJK', spaceAfter=10),
+                                     fontSize=12, leading=24, textColor=colors.black,
+                                     alignment=TA_LEFT, wordWrap='CJK', spaceAfter=16),
         'SectionH1': ParagraphStyle('SectionH1', parent=styles['Normal'], fontName=FONTB,
-                                    fontSize=12, leading=16, textColor=colors.black,
-                                    wordWrap='CJK', spaceBefore=14, spaceAfter=5, keepWithNext=True),
+                                    fontSize=12, leading=24, textColor=colors.black,
+                                    wordWrap='CJK', spaceBefore=14, spaceAfter=6, keepWithNext=True),
         'SectionH2': ParagraphStyle('SectionH2', parent=styles['Normal'], fontName=FONTB,
-                                    fontSize=10.5, leading=14, textColor=colors.black,
-                                    wordWrap='CJK', spaceBefore=10, spaceAfter=3, keepWithNext=True),
+                                    fontSize=12, leading=24, textColor=colors.black,
+                                    wordWrap='CJK', spaceBefore=10, spaceAfter=4, keepWithNext=True),
         'Body': ParagraphStyle('Body', parent=styles['Normal'], fontName=FONT,
-                               fontSize=10, leading=14.5, textColor=colors.black,
-                               alignment=TA_JUSTIFY, wordWrap='CJK', spaceAfter=5),
+                               fontSize=12, leading=24, textColor=colors.black,
+                               alignment=TA_LEFT, wordWrap='CJK', spaceAfter=0),
         'Abstract': ParagraphStyle('Abstract', parent=styles['Normal'], fontName=FONT,
-                                   fontSize=9.5, leading=13.5, textColor=colors.black,
-                                   alignment=TA_JUSTIFY, wordWrap='CJK', spaceAfter=5),
+                                   fontSize=12, leading=24, textColor=colors.black,
+                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=0),
         'FigureLegend': ParagraphStyle('FigureLegend', parent=styles['Normal'], fontName=FONT,
-                                       fontSize=9, leading=12, textColor=colors.black,
-                                       alignment=TA_JUSTIFY, wordWrap='CJK',
-                                       spaceBefore=2, spaceAfter=6),
+                                       fontSize=11, leading=22, textColor=colors.black,
+                                       alignment=TA_LEFT, wordWrap='CJK',
+                                       spaceBefore=2, spaceAfter=10),
         'Reference': ParagraphStyle('Reference', parent=styles['Normal'], fontName=FONT,
-                                    fontSize=9, leading=11.5, textColor=colors.black,
+                                    fontSize=12, leading=24, textColor=colors.black,
                                     wordWrap='CJK',
-                                    leftIndent=16, firstLineIndent=-16, spaceAfter=2),
+                                    leftIndent=18, firstLineIndent=-18, spaceAfter=0),
     }
 
 
@@ -429,8 +432,8 @@ def compile_manuscript_pdf(output_pdf_path, manuscript_data):
     """编译学术 PDF（规范 §四；增补声明节与可配置页眉）。"""
     global HEADER_TEXT
     HEADER_TEXT = manuscript_data.get("running_header", HEADER_TEXT)
-    doc = SimpleDocTemplate(output_pdf_path, pagesize=A4, leftMargin=54, rightMargin=54,
-                            topMargin=54, bottomMargin=54,
+    doc = SimpleDocTemplate(output_pdf_path, pagesize=A4, leftMargin=MARGIN_PT, rightMargin=MARGIN_PT,
+                            topMargin=MARGIN_PT, bottomMargin=MARGIN_PT,
                             title=manuscript_data.get("title", ""),
                             author=manuscript_data.get("authors", ""))
     st = setup_typography_styles()
