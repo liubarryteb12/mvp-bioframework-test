@@ -271,11 +271,14 @@ def setup_typography_styles():
     }
 
 
-def verify_pdf(path, expect_cjk=True, min_cjk=50):
-    """构建后自检（防"字体回落 → 中文被丢"复发）：
+def verify_pdf(path, expect_cjk=True, min_cjk=50, max_boxes=50):
+    """构建后自检（三条防线，逐条对应一次真实事故）：
 
-    ① 字体须全为**嵌入型**（TrueType/Type0/CIDFontType*）——多数期刊硬性要求；
-    ② 若期望中文，正文中文字符数须达标（回落 base-14 时会掉到 0）。
+    ① 字体须全为**嵌入型**（TrueType/Type0/CIDFontType*）——期刊硬性要求；
+    ② 若期望中文，正文中文字符数须达标（回落 base-14 时会掉到 0）；
+    ③ **像素级黑框检测**：字体缺字形时 ReportLab 画 `.notdef`，而 PDF 文本层**仍能抽取**
+       该字符（用户 2026-09-14 反馈"部分黑框/黑块"即此）→ 只验文本层抓不到，必须渲染
+       成像素后数"实心方块"。
     任一不满足即抛错，让 job 失败，不产出"看起来成功"的残缺 PDF。
     """
     try:
@@ -294,6 +297,47 @@ def verify_pdf(path, expect_cjk=True, min_cjk=50):
         raise RuntimeError(f"PDF 含未嵌入字体（期刊多要求嵌入）：{bad}")
     if expect_cjk and n_cjk < min_cjk:
         raise RuntimeError(f"PDF 中文正文缺失（仅 {n_cjk} 个中文字符）→ 字体回落所致")
+    n_box = _count_solid_boxes(path)
+    if n_box is not None:
+        print(f"[排版] 黑框检测：实心黑块 {n_box} 个（阈值 ≤{max_boxes}）")
+        if n_box > max_boxes:
+            raise RuntimeError(
+                f"PDF 检出 {n_box} 个实心黑块（.notdef 黑框）→ 字体缺字形；"
+                "检查字体覆盖或补字体")
+
+
+def _count_solid_boxes(path, dpi=150, dark=50, lo=6, hi=26, fill=0.85):
+    """渲染成像素后统计"实心黑块"数（.notdef 黑框的像素特征）；缺依赖则返回 None。
+
+    判据标定（2026-09-14，三样本对照）：
+      · 好版（WenQuanYiZenHei 交付件）→ 0 个；好版（本机 msyh 渲染）→ 1 个；
+      · 坏版（base-14 Helvetica、中文全丢）→ **2095 个**。
+    故取 `fill > 0.85`（近乎实心方块）；早期用 0.55 会把**笔画密集的中文字**误判为黑块
+    （msyh 下假阳性 19 个，险些误伤），已收紧。
+    """
+    try:
+        import pymupdf
+        import numpy as np
+        from scipy import ndimage
+    except ImportError:
+        print("[排版] 黑框检测跳过：缺 pymupdf/scipy")
+        return None
+    n = 0
+    doc = pymupdf.open(path)
+    for pg in doc:
+        pix = pg.get_pixmap(dpi=dpi, colorspace=pymupdf.csGRAY)
+        arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width)
+        lab, _ = ndimage.label(arr < dark)
+        for i, sl in enumerate(ndimage.find_objects(lab)):
+            if sl is None:
+                continue
+            h = sl[0].stop - sl[0].start
+            w = sl[1].stop - sl[1].start
+            if lo <= w <= hi and lo <= h <= hi:
+                if (lab[sl] == (i + 1)).sum() / float(w * h) > fill:
+                    n += 1
+    doc.close()
+    return n
 
 
 def P(text, style):

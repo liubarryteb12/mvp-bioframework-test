@@ -11,3 +11,4 @@ python-docx
 pypdf
 reportlab
 pytest
+pymupdf
