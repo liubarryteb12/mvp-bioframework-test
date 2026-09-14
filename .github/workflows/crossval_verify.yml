@@ -182,11 +182,15 @@ jobs:
           python gen_ledger.py
           python claim_support_audit.py 2>&1 | tee claim_audit_stdout.txt
           echo "CLAIM_AUDIT_EXIT=${PIPESTATUS[0]}   # 0=结论全部被结果支撑（用户硬要求）"
+          # 排版：CJK 字体必须**先装好再编译**。typeset_engine 需真嵌入 CJK 字体；
+          # 装在编译之后会回落 base-14 → 中文正文被整段丢弃（run 34796985194 实证）。
+          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
           python export_manuscript.py 2>&1 | tee export_stdout.txt
           echo "EXIT=${PIPESTATUS[0]}"
-          # PDF 由 SCI 预印本排版引擎（typeset_engine，内化自 09.SCI文章排版参考）生成
-          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
-          python -c "import pypdf; r=pypdf.PdfReader('export/manuscript_gse31210.pdf'); print('PDF 页数:', len(r.pages)); fonts=[str(f) for pg in r.pages for f in (pg['/Resources'].get('/Font') or {})]; print('PDF 字体对象数:', len(fonts))"
+          # PDF 由 SCI 预印本排版引擎（typeset_engine，内化自 09.SCI文章排版参考）生成；
+          # 门禁：字体须全为嵌入型 + 中文正文须保留（任一不达即 job 失败，防"残缺 PDF"）
+          python -c "import re,sys,pypdf; r=pypdf.PdfReader('export/manuscript_gse31210.pdf'); t=''.join(p.extract_text() or '' for p in r.pages); cjk=len(re.findall(r'[\u4e00-\u9fff]',t)); subs={(str(f.get_object().get('/Subtype')),str(f.get_object().get('/BaseFont'))) for pg in r.pages for f in (pg['/Resources'].get('/Font') or {}).values()}; bad=[s for s in subs if s[0] not in ('/TrueType','/Type0','/CIDFontType2','/CIDFontType0')]; print('PDF 页数:',len(r.pages),'| 中文字符:',cjk,'| 字体:',sorted(subs)); print('PDF 门禁:', 'PASS' if (cjk>200 and not bad) else 'FAIL', '| 未嵌入:',bad); sys.exit(0 if (cjk>200 and not bad) else 1)"
+          echo "PDF_GATE_EXIT=${PIPESTATUS[0]}   # 0=字体全嵌入且中文正文完整"
           python ../crossval/scripts/export_guard.py \
             --a export/docA.txt --b export/docB.txt --p export/docP.txt \
             --out export/export_report.json 2>&1 | tee export_guard_stdout.txt
