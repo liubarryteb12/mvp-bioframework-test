@@ -8,9 +8,12 @@
 本内化版增补：① 字体注册（多候选探测 + **真嵌入** + CJK 覆盖实测；**禁止**回落 base-14）；
   ② 页眉可配置；③ 声明（Declarations）节；④ 正文双端对齐；⑤ 构建后 PDF 自检。
 
-字体纪律（run 34796985194 实证）：云端曾因 `fonts-noto-cjk` 装在编译之后 → 引擎静默回落
-base-14 Helvetica → **中文正文被整段丢弃**（PDF 中文字符数 = 0）。现改为：候选逐个探测并
-嵌入；无 CJK 覆盖而稿件含中文时**直接抛错**；构建后再自检"字体全嵌入 + 中文字符数达标"。
+字体纪律（两条，均有实证）：
+  · run 34796985194：`fonts-noto-cjk` 装在编译之后 → 引擎静默回落 base-14 → **中文整段丢失**
+    （PDF 中文字符数 = 0）。→ 候选逐个探测并**真嵌入**；禁 base-14；构建后自检。
+  · 用户 2026-09-14（黑框）：主字体**缺字形**时 PDF 文本层仍可抽取，但画出来是 `.notdef`
+    方框 —— 只看"中文字符数/是否嵌入"抓不到。→ 注册**全部可用字体**，`_wrap()` 逐字选
+    覆盖字体；构建前 `assert_glyph_coverage()` 断言**字符集全覆盖**，缺字即抛错。
 """
 import os, re
 from reportlab.lib.pagesizes import A4
@@ -68,59 +71,123 @@ def _has_cjk(text):
     return bool(re.search(r"[\u4e00-\u9fff]", text or ""))
 
 
-def _cjk_covered(path, index):
-    """真实探测字体是否含"中"字形 —— 用 cmap 判定，不靠渲染掩膜。
-
-    教训（run 34815434564）：PIL 渲染掩膜法对**缺字**也返回非空（.notdef 豆腐块本身有
-    轮廓）→ DejaVu 被误判为"覆盖=是"，直到构建后自检才发现中文字符 0。
-    """
+def _coverage(path):
+    """返回字体覆盖的码位集合（读 cmap）。读不到返回空集（视作不覆盖任何字符）。"""
     try:
         from matplotlib.ft2font import FT2Font
-        return ord("中") in FT2Font(path).get_charmap()
+        return set(FT2Font(path).get_charmap())
     except Exception:
-        pass
-    try:                                   # Fallback：与私用区码位渲染结果比对
-        from PIL import ImageFont
-        f = ImageFont.truetype(path, 20, index=index or 0)
-        m1, m2 = f.getmask("中"), f.getmask("\ue000")
-        return m1.size == m2.size and bytes(m1) != bytes(m2)
-    except Exception:
-        return False
+        return set()
+
+
+# 已注册字体登记表：[(reportlab 名, 路径, 覆盖码位集合)]；[0] 为**主字体**
+_REGISTERED = []
+
+
+def _register_pair(name, reg, bold, ttc_index):
+    """注册一对（常规/粗体）并登记覆盖集合；失败返回 False（调用方跳过该候选）。"""
+    if ttc_index is not None:                        # .ttc 字体集合需指定子字体
+        pdfmetrics.registerFont(TTFont(name, reg, subfontIndex=ttc_index))
+        pdfmetrics.registerFont(TTFont(name + "-Bold",
+                                       bold if os.path.exists(bold) else reg,
+                                       subfontIndex=ttc_index))
+    else:
+        pdfmetrics.registerFont(TTFont(name, reg))
+        pdfmetrics.registerFont(TTFont(name + "-Bold", bold if os.path.exists(bold) else reg))
+    # 字体族：让 <b>/<i> 映射到**已嵌入**字体，否则会回落 base-14 Helvetica-Bold（不嵌入）
+    pdfmetrics.registerFontFamily(name, normal=name, bold=name + "-Bold",
+                                 italic=name, boldItalic=name + "-Bold")
+    _REGISTERED.append((name, reg, _coverage(reg)))
+    return True
 
 
 def register_fonts():
-    """返回 (font, font_bold, cjk_ok)：逐个探测候选并**真嵌入**（TrueType/Type0）。
+    """注册**主字体 + 全部可用备用字体**（覆盖驱动，防 .notdef 黑框）。
 
-    契约：**禁止**回落 base-14（Helvetica）——它不嵌入且无 CJK，会静默丢中文；
-    候选全部不可用时**抛错**，让云端 job 失败而不是产出残缺 PDF。
+    契约（两条，均有 run 实证）：
+      ① **禁止**回落 base-14：既不嵌入、也无 CJK，会静默丢中文（run 34796985194）；
+      ② 主字体缺字形时**不得**直接画 .notdef（黑框）——这正是用户 2026-09-14 反馈的
+         "部分黑框/黑块"：文本层能抽出字，但画出来是方框。故本函数把候选表里所有
+         可嵌入字体都注册进来，配合 `_wrap()` 逐字选字体，并在构建前断言覆盖完备。
     """
+    main = None
     for reg, bold, ttc_index in _FONT_CANDIDATES:
         if not reg or not os.path.exists(reg):
             continue
         try:
-            if ttc_index is not None:                   # .ttc 字体集合需指定子字体
-                pdfmetrics.registerFont(TTFont("DOC", reg, subfontIndex=ttc_index))
-                pdfmetrics.registerFont(TTFont("DOC-Bold", bold if os.path.exists(bold) else reg,
-                                               subfontIndex=ttc_index))
+            name = "DOC" if main is None else f"ALT{len(_REGISTERED)}"
+            if not _register_pair(name, reg, bold, ttc_index):
+                continue
+            if main is None:
+                main = name
+                from reportlab import rl_config
+                rl_config.canvas_basefontname = main      # 画布初始字体默认是 base-14
+                print(f"[排版] 主字体已嵌入：{os.path.basename(reg)}"
+                      f"（覆盖 {len(_REGISTERED[-1][2])} 码位）")
+                if ord("中") not in _REGISTERED[-1][2]:
+                    print("[排版] 警告：主字体不含中文，含中文稿件将由备用字体承接")
             else:
-                pdfmetrics.registerFont(TTFont("DOC", reg))
-                pdfmetrics.registerFont(TTFont("DOC-Bold", bold if os.path.exists(bold) else reg))
-            cjk_ok = _cjk_covered(reg, ttc_index)
-            # 注册字体族：让 <b>/<i> 标记映射到**已嵌入**字体，
-            # 否则 ReportLab 会把粗体回落到 base-14 Helvetica-Bold（不嵌入 → 期刊不合规）
-            pdfmetrics.registerFontFamily("DOC", normal="DOC", bold="DOC-Bold",
-                                          italic="DOC", boldItalic="DOC-Bold")
-            # ReportLab 画布初始字体默认是 base-14 Helvetica → 全局覆盖，避免它出现在
-            # 页面资源里（否则"字体全嵌入"这条期刊硬要求过不了）
-            from reportlab import rl_config
-            rl_config.canvas_basefontname = "DOC"
-            print(f"[排版] 字体已嵌入：{os.path.basename(reg)}（CJK 覆盖={'是' if cjk_ok else '否'}）")
-            return "DOC", "DOC-Bold", cjk_ok
+                print(f"[排版] 备用字体已注册：{os.path.basename(reg)}"
+                      f"（覆盖 {len(_REGISTERED[-1][2])} 码位）")
         except (TTFError, OSError, ValueError) as ex:
             print(f"[排版] 字体注册失败（{reg}）：{ex}")
-    raise RuntimeError(
-        "未找到可嵌入的 TTF 字体：请安装 fonts-noto-cjk（Linux）/ 提供 CJK 字体路径；"
-        "禁止回落 base-14（会丢中文且不嵌入）")
+    if main is None:
+        raise RuntimeError(
+            "未找到可嵌入的 TTF 字体：请安装 fonts-wqy-zenhei / fonts-droid-fallback；"
+            "禁止回落 base-14（会丢中文且不嵌入）")
+    cjk_ok = any(ord("中") in cov for _n, _p, cov in _REGISTERED)
+    return "DOC", "DOC-Bold", cjk_ok
+
+
+def _font_name_for(ch):
+    """选一个覆盖该字符的已注册字体名；无则返回 None。"""
+    cp = ord(ch)
+    for name, _path, cov in _REGISTERED:
+        if cp in cov:
+            return name
+    return None
+
+
+def missing_glyphs(text):
+    """返回**无任何已注册字体覆盖**的字符集合（这些会渲染成黑框）。"""
+    return {ch for ch in set(text or "") if not ch.isspace() and _font_name_for(ch) is None}
+
+
+def _wrap(text):
+    """把主字体未覆盖的字符用备用字体包起来（防 .notdef 黑框）。
+
+    ReportLab 不做逐字回退，缺字形直接画方框；这里按覆盖集合把连续的同字体片段
+    包成 `<font name="ALTn">…</font>`，并保持与原有 `<b>` 等标记兼容（标记字符是
+    ASCII，必在主字体覆盖内，故不会被包裹）。
+    """
+    if not text or not _REGISTERED:
+        return text
+    main = _REGISTERED[0][0]
+    out, run, cur = [], [], main
+
+    def flush():
+        if run:
+            s = "".join(run)
+            out.append(s if cur == main else f'<font name="{cur}">{s}</font>')
+            del run[:]
+
+    for ch in text:
+        nm = _font_name_for(ch) or main
+        if nm != cur:
+            flush()
+            cur = nm
+        run.append(ch)
+    flush()
+    return "".join(out)
+
+
+def _needs_alt(text):
+    """该串是否含需要备用字体承接的字符（用于决定表格单元格是否转 Paragraph）。"""
+    if not _REGISTERED:
+        return False
+    main = _REGISTERED[0][0]
+    return any((not ch.isspace()) and (_font_name_for(ch) or main) != main
+               for ch in text or "")
 
 
 FONT, FONTB, FONT_CJK = register_fonts()
@@ -229,6 +296,43 @@ def verify_pdf(path, expect_cjk=True, min_cjk=50):
         raise RuntimeError(f"PDF 中文正文缺失（仅 {n_cjk} 个中文字符）→ 字体回落所致")
 
 
+def P(text, style):
+    """构造 Paragraph：自动把主字体缺字形的字符交给备用字体（防 .notdef 黑框）。"""
+    return Paragraph(_wrap(text), style)
+
+
+def _collect_text(md):
+    """收集稿件中所有会进入版面的文本（供字形覆盖断言）。"""
+    parts = [str(md.get(k, "")) for k in ("title", "authors", "abstract", "keywords")]
+    for sec in md.get("sections", []):
+        parts.append(str(sec.get("heading", "")))
+        parts += [str(p) for p in sec.get("paragraphs", [])]
+        t = sec.get("table")
+        if t:
+            parts.append(str(t.get("caption", "")))
+            parts += [str(c) for row in t.get("data", []) for c in row]
+        for f in sec.get("figures", []):
+            parts += [str(f.get("id", "")), str(f.get("title", "")), str(f.get("legend", ""))]
+    for k, v in md.get("declarations", []):
+        parts += [str(k), str(v)]
+    parts += [str(r) for r in md.get("references", [])]
+    return "\n".join(parts)
+
+
+def assert_glyph_coverage(md):
+    """构建前断言：稿件每个字符都有**已注册字体**覆盖，否则报出具体缺字（防黑框）。
+
+    背景（用户 2026-09-14 反馈"部分黑框/黑块"）：缺字形时 PDF **文本层仍可提取**，
+    但绘制出来是 `.notdef` 方框 —— 单看"中文字符数/字体是否嵌入"抓不到这一类，
+    必须按**字符集覆盖**判定。
+    """
+    miss = missing_glyphs(_collect_text(md))
+    if miss:
+        raise RuntimeError(
+            "以下字符无任何已注册字体覆盖，会渲染成黑框（请补字体或改写字符）："
+            + " ".join(f"{c}(U+{ord(c):04X})" for c in sorted(miss)))
+
+
 def compile_manuscript_pdf(output_pdf_path, manuscript_data):
     """编译学术 PDF（规范 §四；增补声明节与可配置页眉）。"""
     global HEADER_TEXT
@@ -238,22 +342,25 @@ def compile_manuscript_pdf(output_pdf_path, manuscript_data):
                             title=manuscript_data.get("title", ""),
                             author=manuscript_data.get("authors", ""))
     st = setup_typography_styles()
-    story = [Paragraph(manuscript_data['title'], st['DocTitle']),
-             Paragraph(manuscript_data['authors'], st['DocAuthors']),
+    story = [P(manuscript_data['title'], st['DocTitle']),
+             P(manuscript_data['authors'], st['DocAuthors']),
              HRFlowable(width="100%", thickness=1, color=colors.HexColor('#cbd5e1'),
                         spaceBefore=2, spaceAfter=10),
-             Paragraph("<b>摘要 Abstract</b>", st['SectionH2']),
-             Paragraph(manuscript_data['abstract'], st['Abstract']),
-             Paragraph(f"<b>关键词 Keywords：</b> {manuscript_data['keywords']}", st['Abstract']),
+             P("<b>摘要 Abstract</b>", st['SectionH2']),
+             P(manuscript_data['abstract'], st['Abstract']),
+             P(f"<b>关键词 Keywords：</b> {manuscript_data['keywords']}", st['Abstract']),
              HRFlowable(width="100%", thickness=0.8, color=colors.HexColor('#cbd5e1'),
                         spaceBefore=6, spaceAfter=10)]
     for sec in manuscript_data['sections']:
-        story.append(Paragraph(sec['heading'], st['SectionH1']))
+        story.append(P(sec['heading'], st['SectionH1']))
         for para in sec.get('paragraphs', []):
-            story.append(Paragraph(para, st['Body']))
+            story.append(P(para, st['Body']))
         if 'table' in sec:
             t_def = sec['table']
-            t_flowable = Table(t_def['data'], colWidths=t_def.get('col_widths'))
+            # 单元格含主字体缺字形字符时，必须转 Paragraph 才能逐字换字体（否则仍画黑框）
+            cells = [[P(str(c), st['Body']) if _needs_alt(str(c)) else c for c in row]
+                     for row in t_def['data']]
+            t_flowable = Table(cells, colWidths=t_def.get('col_widths'))
             t_flowable.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f1f5f9')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#0f172a')),
@@ -265,26 +372,51 @@ def compile_manuscript_pdf(output_pdf_path, manuscript_data):
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')])]))
             story.append(KeepTogether([Spacer(1, 4),
-                                       Paragraph(f"<b>{t_def['caption']}</b>", st['SectionH2']),
+                                       P(f"<b>{t_def['caption']}</b>", st['SectionH2']),
                                        t_flowable, Spacer(1, 8)]))
         for fig in sec.get('figures', []):
             story.append(KeepTogether([Spacer(1, 4),
                                        get_image_flowable(fig['path'], fig.get('width', 5.0 * inch)),
-                                       Paragraph(f"<b>{fig['id']}. {fig['title']}.</b> {fig['legend']}",
-                                                 st['FigureLegend'])]))
+                                       P(f"<b>{fig['id']}. {fig['title']}.</b> {fig['legend']}",
+                                         st['FigureLegend'])]))
         if sec.get('page_break_after'):
             story.append(PageBreak())
-    story.append(Paragraph("声明 Declarations", st['SectionH1']))
+    story.append(P("声明 Declarations", st['SectionH1']))
     for k, v in manuscript_data.get('declarations', []):
-        story.append(Paragraph(f"<b>{k}</b>", st['SectionH2']))
-        story.append(Paragraph(v, st['Body']))
-    story.append(Paragraph("参考文献 References", st['SectionH1']))
+        story.append(P(f"<b>{k}</b>", st['SectionH2']))
+        story.append(P(v, st['Body']))
+    story.append(P("参考文献 References", st['SectionH1']))
     for ref in manuscript_data.get('references', []):
-        story.append(Paragraph(ref, st['Reference']))
-    # 前置守卫：稿件含中文但注册字体无 CJK 覆盖 → 立即失败（不产出"中文被丢"的残缺 PDF）
+        story.append(P(ref, st['Reference']))
+    # 前置守卫一：稿件含中文但注册字体无 CJK 覆盖 → 立即失败（不产出"中文被丢"的残缺 PDF）
     _need_cjk = _has_cjk(str(manuscript_data))
     if _need_cjk and not FONT_CJK:
-        raise RuntimeError("稿件含中文，但当前注册字体无 CJK 覆盖：请安装 fonts-noto-cjk 后重跑")
+        raise RuntimeError("稿件含中文，但当前注册字体无 CJK 覆盖：请安装 CJK 字体后重跑")
+    # 前置守卫二：逐字字形覆盖断言 —— 缺字形会画成黑框，必须构建前拦下
+    assert_glyph_coverage(manuscript_data)
     doc.build(story, canvasmaker=NumberedCanvas)
     print(f"成功编译 PDF：{output_pdf_path}")
     verify_pdf(output_pdf_path, expect_cjk=_need_cjk)
+
+
+if __name__ == "__main__":
+    # 字体自检（本机 / 云端均可随时复跑）：注册表 + 逐字回退 + 覆盖完备
+    print("=" * 72)
+    print("  typeset_engine 字体自检（防黑框/防丢字）")
+    print("=" * 72)
+    for _n, _p, _cov in _REGISTERED:
+        print(f"  {_n:<6s} {os.path.basename(_p):<26s} 覆盖 {len(_cov)} 码位")
+    _demo = "AUC ΔAUC χ² 0.11–0.16 风险↑ → ≥ 主要终点"
+    _risk = "Δχ–↑→≥²"
+    _saved = set(_REGISTERED[0][2])
+    _REGISTERED[0][2].difference_update({ord(c) for c in _risk})   # 模拟主字体缺字形
+    _w = _wrap(_demo)
+    _plain = re.sub(r"<[^>]+>", "", _w)
+    _ok = ('<font name="' in _w) and _plain == _demo
+    print("\n[逐字回退] 模拟主字体缺字形 →", _w)
+    print("[逐字回退]", "PASS" if _ok else "FAIL")
+    _REGISTERED[0][2].clear()
+    _REGISTERED[0][2].update(_saved)
+    _miss = missing_glyphs(_demo + "摘要关键词声明参考文献")
+    print("[覆盖完备]", "PASS（无缺字）" if not _miss else f"FAIL 缺字 {sorted(_miss)}")
+    raise SystemExit(0 if (_ok and not _miss) else 1)
