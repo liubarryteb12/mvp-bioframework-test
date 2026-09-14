@@ -465,9 +465,10 @@ def kinsoku(text, style, avail_width):
 
     lines, cur, cur_w = [], [], 0.0
     pending_break = False                # 原文硬换行（<br/>）挂起：若下一 token 是禁则
-    # 余量 1.5%：实测宽度略小于 ReportLab 实际渲染宽度（缺字距/bold 开销），
-    # 片段一旦超框会被二次折行，把末尾标点甩成"孤标点行"（2026-09-14 实测）。
-    limit = avail_width * 0.985
+    # 余量 3%：实测宽度略小于 ReportLab 实际渲染宽度（字距/bold 开销），
+    # 片段一旦超框会被二次折行，把末尾标点甩成"孤标点行"（2026-09-14 实测：
+    # 1.5% 仍残留 1 处摘要加粗标签后的"：" → 提到 3%）。
+    limit = avail_width * 0.97
     for tk in toks:
         if tk.lower() in ("<br/>", "<br>"):
             pending_break = True
