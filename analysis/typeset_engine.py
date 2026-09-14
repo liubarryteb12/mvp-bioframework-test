@@ -40,22 +40,25 @@ def _mpl_ttf(name):
 # 反面教训（run 34796985194）：原实现只探一个 Noto 路径，探不到就静默回落 base-14
 # Helvetica —— base-14 既不嵌入、也无 CJK，导致中文正文被整段丢弃（PDF 中文字符数=0）。
 _FONT_CANDIDATES = [
-    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 0),
-    ("/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
-     "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Bold.otf", None),
-    ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-     "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc", 0),
+    # ① TrueType 轮廓的中文字体（ReportLab 可嵌入）——首选
     ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
      "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 0),
+    ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+     "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", None),
     ("/usr/share/fonts/truetype/arphic/uming.ttc",
      "/usr/share/fonts/truetype/arphic/uming.ttc", 0),
+    ("/usr/share/fonts/truetype/arphic/ukai.ttc",
+     "/usr/share/fonts/truetype/arphic/ukai.ttc", 0),
     # Windows（本机预检）
     ("C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/msyhbd.ttc", 0),
     ("C:/Windows/Fonts/simsun.ttc", "C:/Windows/Fonts/simhei.ttf", 0),
     # macOS
     ("/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/PingFang.ttc", 0),
-    # 兜底：DejaVu（嵌入 OK、无 CJK —— 含中文的稿件会在构建后被自检拦下）
+    # ② Noto CJK：**CFF/PostScript 轮廓，ReportLab 报 "postscript outlines are not
+    #    supported"**（run 34815434564 实证）。保留在末尾，只为给出明确的失败信息。
+    ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 0),
+    # ③ 兜底：DejaVu（嵌入 OK、**无 CJK** —— 含中文的稿件会被构建后自检拦下）
     (_mpl_ttf("DejaVuSans.ttf"), _mpl_ttf("DejaVuSans-Bold.ttf"), None),
 ]
 
@@ -66,12 +69,21 @@ def _has_cjk(text):
 
 
 def _cjk_covered(path, index):
-    """真实探测字体是否覆盖中文（渲染"中"字看掩膜是否非空），不靠文件名猜。"""
+    """真实探测字体是否含"中"字形 —— 用 cmap 判定，不靠渲染掩膜。
+
+    教训（run 34815434564）：PIL 渲染掩膜法对**缺字**也返回非空（.notdef 豆腐块本身有
+    轮廓）→ DejaVu 被误判为"覆盖=是"，直到构建后自检才发现中文字符 0。
+    """
     try:
+        from matplotlib.ft2font import FT2Font
+        return ord("中") in FT2Font(path).get_charmap()
+    except Exception:
+        pass
+    try:                                   # Fallback：与私用区码位渲染结果比对
         from PIL import ImageFont
-        f = ImageFont.truetype(path, 14, index=index or 0)
-        mask = f.getmask("中")
-        return bool(mask.getbbox())
+        f = ImageFont.truetype(path, 20, index=index or 0)
+        m1, m2 = f.getmask("中"), f.getmask("\ue000")
+        return m1.size == m2.size and bytes(m1) != bytes(m2)
     except Exception:
         return False
 
