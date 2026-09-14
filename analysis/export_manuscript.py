@@ -206,8 +206,9 @@ docA_real.save(os.path.join(OUT, "manuscript_编辑版.docx"))
 from PIL import Image as PILImage
 
 PAGE_W_PT = 595.276                                # A4 宽（pt）
-MARGIN_PT = 2.5 * 28.3465                          # 2.5cm 页边距（排版要求 §1）
-COL_W_IN = (PAGE_W_PT - 2 * MARGIN_PT) / 72.0      # 版心宽 = 160 mm = 6.299 in
+MARGIN_PT = 54                                     # 与排版引擎一致（版心 171.9mm）
+COL_W_IN = (PAGE_W_PT - 2 * MARGIN_PT) / 72.0      # 版心宽 = 171.9 mm = 6.767 in
+# 注：170mm 双栏图在 171.9mm 版心内恰好 1.0× 零缩放嵌入（85/170 安全规格 × 54pt 版心）
 
 
 def fig_width_in(n, max_in=COL_W_IN):

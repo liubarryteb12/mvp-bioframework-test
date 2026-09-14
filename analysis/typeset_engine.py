@@ -30,9 +30,12 @@ from PIL import Image
 
 HEADER_TEXT = "PREPRINT MANUSCRIPT DRAFT"
 
-# 版面基线（09/02/排版要求 §1"通用安全格式"）：A4 四周 2.5cm、单栏、Times 12pt、
-# 双倍行距、左对齐（Elsevier："不要使用两端对齐"——与中文"字间空隙"反馈同源）、页码。
-MARGIN_PT = 2.5 * 28.3465          # 2.5 cm ≈ 70.87 pt
+# 版面基线（2026-09-14 终版，用户裁定："排版定稿观感"优先）：
+# PDF = 排版定稿：A4、54pt 四边距（版心 171.9mm，恰好容下 170mm 双栏图 → 1.0× 零缩放）、
+#       衬线 Times/宋体、正文 10pt/14.5 两端对齐（配合 wordWrap='CJK'）；
+# docx = 投稿工作稿：TNR 12pt + 双倍行距 + 连续行号（09/02 排版要求 §1 对 Word 稿的要求，
+#       由 export_manuscript.style_submission 落实）。两套口径各归其位，不再互相套用。
+MARGIN_PT = 54
 
 
 def _mpl_ttf(name):
@@ -282,43 +285,46 @@ def get_image_flowable(image_path, target_width=5.0 * inch):
 
 
 def setup_typography_styles():
-    """版式样式表（**以 09.SCI文章出图与排版参考/02 的"通用安全格式"为最高依据**）。
+    """版式样式表 —— **排版定稿观感**（2026-09-14 终版，用户裁定）。
 
-    该模板的硬性条款（覆盖此前所有局部判断）：
-      ① Times New Roman 12 pt + **双倍行距**（全篇含摘要/图注/参考文献）；
-      ② **左对齐，不要两端对齐**（Elsevier 明文；与中文"字间空隙"反馈同源）；
-      ③ `wordWrap="CJK"` 必开（否则中文整段被当成一个"长单词"，断行失控）；
-      ④ 衬线字体（西文 Times/Liberation Serif、中文宋体经 `_wrap()` 逐段承接）。
-    双倍行距 = 12pt 正文配 24pt 行距（leading）。
+    定位：本引擎产出的是"排版完整版 PDF"（定稿观感），对应出版社**已排版文章**的样子；
+    "TNR 12pt + 双倍行距 + 行号"是模板对 **Word 投稿工作稿** 的要求，由
+    `export_manuscript.style_submission()` 在三份 docx 上落实 —— 两套口径各归其位。
+
+    四条不变量（历轮反馈的正反教训，均已实测）：
+      ① `wordWrap="CJK"` 必开（否则中文整段被当成一个"长单词"，断行失控）；
+      ② 两端对齐**必须**与 ① 配套（无 CJK 断行的 justify 才会塞字间空隙）；
+      ③ 衬线字体（西文 Times/Liberation Serif、中文宋体经 `_wrap()` 逐段承接）+ 黑色正文；
+      ④ 正文 10pt/14.5 紧凑行距 —— 双倍行距版（12/24）实测被用户判"更差"，弃用。
     """
     styles = getSampleStyleSheet()
     return {
         'DocTitle': ParagraphStyle('DocTitle', parent=styles['Normal'], fontName=FONTB,
-                                   fontSize=13, leading=26, textColor=colors.black,
-                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=12),
+                                   fontSize=15, leading=21, textColor=colors.black,
+                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=8),
         'DocAuthors': ParagraphStyle('DocAuthors', parent=styles['Normal'], fontName=FONT,
-                                     fontSize=12, leading=24, textColor=colors.black,
-                                     alignment=TA_LEFT, wordWrap='CJK', spaceAfter=16),
+                                     fontSize=10, leading=14, textColor=colors.black,
+                                     alignment=TA_LEFT, wordWrap='CJK', spaceAfter=10),
         'SectionH1': ParagraphStyle('SectionH1', parent=styles['Normal'], fontName=FONTB,
-                                    fontSize=12, leading=24, textColor=colors.black,
-                                    wordWrap='CJK', spaceBefore=14, spaceAfter=6, keepWithNext=True),
+                                    fontSize=12, leading=16, textColor=colors.black,
+                                    wordWrap='CJK', spaceBefore=14, spaceAfter=5, keepWithNext=True),
         'SectionH2': ParagraphStyle('SectionH2', parent=styles['Normal'], fontName=FONTB,
-                                    fontSize=12, leading=24, textColor=colors.black,
-                                    wordWrap='CJK', spaceBefore=10, spaceAfter=4, keepWithNext=True),
+                                    fontSize=10.5, leading=14, textColor=colors.black,
+                                    wordWrap='CJK', spaceBefore=10, spaceAfter=3, keepWithNext=True),
         'Body': ParagraphStyle('Body', parent=styles['Normal'], fontName=FONT,
-                               fontSize=12, leading=24, textColor=colors.black,
-                               alignment=TA_LEFT, wordWrap='CJK', spaceAfter=0),
+                               fontSize=10, leading=14.5, textColor=colors.black,
+                               alignment=TA_JUSTIFY, wordWrap='CJK', spaceAfter=5),
         'Abstract': ParagraphStyle('Abstract', parent=styles['Normal'], fontName=FONT,
-                                   fontSize=12, leading=24, textColor=colors.black,
-                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=0),
+                                   fontSize=9.5, leading=14, textColor=colors.black,
+                                   alignment=TA_JUSTIFY, wordWrap='CJK', spaceAfter=5),
         'FigureLegend': ParagraphStyle('FigureLegend', parent=styles['Normal'], fontName=FONT,
-                                       fontSize=11, leading=22, textColor=colors.black,
-                                       alignment=TA_LEFT, wordWrap='CJK',
-                                       spaceBefore=2, spaceAfter=10),
+                                       fontSize=8.5, leading=12, textColor=colors.black,
+                                       alignment=TA_JUSTIFY, wordWrap='CJK',
+                                       spaceBefore=2, spaceAfter=6),
         'Reference': ParagraphStyle('Reference', parent=styles['Normal'], fontName=FONT,
-                                    fontSize=12, leading=24, textColor=colors.black,
+                                    fontSize=8.5, leading=12, textColor=colors.black,
                                     wordWrap='CJK',
-                                    leftIndent=18, firstLineIndent=-18, spaceAfter=0),
+                                    leftIndent=14, firstLineIndent=-14, spaceAfter=2),
     }
 
 
