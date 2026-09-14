@@ -277,8 +277,8 @@ _pts, _labs = [], []
 for _msk in (up, dn):
     for _i, _r in d[_msk].nlargest(3, "-log10P").iterrows():
         _pts.append((_r["log2FC"], _r["-log10P"])); _labs.append(str(_r["symbol"]))
-_place_labels(ax, _pts, _labs)
-legend_outside(ax, ncol=1)
+legend_outside(ax, ncol=1)       # 先放图例：图例占右侧空间会触发重新布局，
+_place_labels(ax, _pts, _labs)   # 标签避让必须基于**最终**几何（否则被挤压后重叠）
 _audit_issues += save(fig, "01_deg_volcano")
 
 # ---------- 图2 富集点图（enrichment） ----------
@@ -290,22 +290,38 @@ try:
     sel = sel.sort_values(["grp", "Adjusted P-value"], ascending=[True, False]).reset_index(drop=True)
     # 纵坐标槽位按**标签实际行数**分配：wrap 后各标签 1–3 行不等，固定行距会令多行
     # 标签互相叠压（用户 2026-09-14 反馈"纵坐标文字叠起来了"的根因）。
-    labs = [wrap(t, 42) for t in sel["Term"]]
+    # 出图要求 4.6：富集图须含**基因数**（气泡大小 + 大小图例）与颜色图例。
+    # 基因数取 T04 的 Overlap 分子（如 "38/109" → 38）。
+    sel["n_gene"] = sel["Overlap"].astype(str).str.split("/").str[0].astype(int)
+    labs = [wrap(t, 40) + f" (n={int(c)})" for t, c in zip(sel["Term"], sel["n_gene"])]
     ln = np.array([l.count("\n") + 1 for l in labs], float)
     ypos = np.concatenate([[0.0], np.cumsum(ln)])[:-1]   # 行 i 的起点 = 前 i 个标签占的总行数
     # 图高随总行数自适应：行高取 2.0 倍 FS_SMALL（constrained_layout 会把标题/轴标/
     # 轴外图例从图高中扣掉一大块固定余量，1.5 倍实测仍会叠压），另留 1.3in 版面余量
     fig, ax = new_fig(COL2, max(3.3, float(ln.sum()) * FS_SMALL * 2.0 / 72 + 1.3))
+    _nmin = float(sel["n_gene"].min())
+    _sz = 10 + (sel["n_gene"].astype(float) - _nmin) * 2.2      # 气泡面积随基因数增大
     for grp, col in [("Up-regulated", VERM), ("Down-regulated", BLUE)]:
         s = (sel["grp"] == grp).to_numpy()
-        ax.scatter(sel.loc[s, "Adjusted P-value"], ypos[s], s=26, c=col, linewidths=0,
-                   label=f"{grp} genes (n = {int(s.sum())})")
+        ax.scatter(sel.loc[s, "Adjusted P-value"], ypos[s], s=_sz[s].to_numpy(), c=col,
+                   linewidths=0, label=f"{grp} genes (n = {int(s.sum())})")
     ax.set_yticks(ypos)
     ax.set_yticklabels(labs, fontsize=FS_SMALL)
     ax.set_ylim(float(ypos[-1] + ln[-1]) - 0.35, -0.75)
     ax.set_xscale("log")
     ax.set_xlabel("Adjusted P-value (Benjamini–Hochberg)")
-    legend_outside(ax, ncol=2)
+    # 双图例：右上=方向（颜色），右下=基因数（气泡大小）——均在坐标轴外，不压数据
+    from matplotlib.lines import Line2D
+    _h, _l = ax.get_legend_handles_labels()
+    fig.legend(_h, _l, frameon=False, loc="outside right upper", handlelength=1.1,
+               handletextpad=0.5, labelspacing=0.5)
+    _ref = sorted({int(sel["n_gene"].min()), int(sel["n_gene"].median()),
+                   int(sel["n_gene"].max())})
+    _sh = [Line2D([], [], marker="o", ls="", mfc="none", mec="0.35",
+                  ms=float(np.sqrt(10 + (v - _nmin) * 2.2)), label=str(v)) for v in _ref]
+    fig.legend(handles=_sh, frameon=False, loc="outside right lower", title="Gene count",
+               title_fontsize=FS_SMALL, fontsize=FS_SMALL, handletextpad=0.9,
+               labelspacing=0.9, borderpad=0.2)
     _audit_issues += save(fig, "02_enrichment_dotplot")
 except Exception as ex:
     print("图2 跳过:", ex)
