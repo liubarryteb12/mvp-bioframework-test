@@ -219,6 +219,9 @@ jobs:
           python bio_pipeline.py --config pipeline_config_v2_methods.json 2>&1 | tee pipeline_v2_log.txt
           echo "PIPELINE_V2_EXIT=${PIPESTATUS[0]}"
 
+      # 大 artifact：全量审计留痕。其中 `analysis/runs/**/expr_log2.csv` 已排除——
+      # 每份 234 MB、跨 run 逐位相同、可由 06 数据 + M03 重算；它曾把本包撑到 ~454 MB，
+      # 而通常只需要其中 ~2 MB 的排版件/图件 → 那两项另出小 artifact（见下）。
       - uses: actions/upload-artifact@v4
         with:
           name: gse31210-figures-results
@@ -240,6 +243,24 @@ jobs:
             analysis/pipeline_plugin_log.txt
             analysis/pipeline_v2_log.txt
             analysis/runs/
+            !analysis/runs/**/expr_log2.csv
+          retention-days: 30
+
+      # 小 artifact：只装排版件（~2 MB），刷新交付件时不必再拉整包
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gse31210-export
+          path: |
+            analysis/export/
+            analysis/export_stdout.txt
+            analysis/export_guard_stdout.txt
+          retention-days: 30
+
+      # 小 artifact：只装图件四格式（~2 MB）
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gse31210-figures
+          path: figures/
           retention-days: 30
 
   realdata-preflight:

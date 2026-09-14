@@ -21,6 +21,7 @@ from reportlab.lib import colors
 from reportlab.lib.units import inch
 from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Image as RLImage,
                                 Table, TableStyle, PageBreak, KeepTogether, HRFlowable)
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
@@ -242,32 +243,41 @@ def get_image_flowable(image_path, target_width=5.0 * inch):
 
 
 def setup_typography_styles():
+    """版式样式表。
+
+    两项针对中文排版的关键设定（用户 2026-09-14 反馈"中/西文/符号间有明显空隙"）：
+      ① `wordWrap="CJK"`：ReportLab 默认按空格断行，中文整段会被当成一个"长单词"，
+         断行与对齐都会失控；
+      ② 正文**不用两端对齐**（`alignment=TA_LEFT`）：中文没有空格可供拉伸，
+         TA_JUSTIFY 会把余量塞进**字与字之间**，视觉上就是"字间空隙/空白"。
+    """
     styles = getSampleStyleSheet()
     return {
         'DocTitle': ParagraphStyle('DocTitle', parent=styles['Normal'], fontName=FONTB,
                                    fontSize=15, leading=20, textColor=colors.HexColor('#0f172a'),
-                                   alignment=1, spaceAfter=10),
+                                   alignment=1, wordWrap='CJK', spaceAfter=10),
         'DocAuthors': ParagraphStyle('DocAuthors', parent=styles['Normal'], fontName=FONT,
                                      fontSize=9, leading=13, textColor=colors.HexColor('#334155'),
-                                     alignment=1, spaceAfter=12),
+                                     alignment=1, wordWrap='CJK', spaceAfter=12),
         'SectionH1': ParagraphStyle('SectionH1', parent=styles['Normal'], fontName=FONTB,
                                     fontSize=11.5, leading=15, textColor=colors.HexColor('#0f172a'),
-                                    spaceBefore=14, spaceAfter=6, keepWithNext=True),
+                                    wordWrap='CJK', spaceBefore=12, spaceAfter=5, keepWithNext=True),
         'SectionH2': ParagraphStyle('SectionH2', parent=styles['Normal'], fontName=FONTB,
                                     fontSize=10, leading=13.5, textColor=colors.HexColor('#0072B2'),
-                                    spaceBefore=10, spaceAfter=4, keepWithNext=True),
+                                    wordWrap='CJK', spaceBefore=8, spaceAfter=3, keepWithNext=True),
         'Body': ParagraphStyle('Body', parent=styles['Normal'], fontName=FONT,
-                               fontSize=9, leading=13.5, textColor=colors.HexColor('#1e293b'),
-                               alignment=4, spaceAfter=6),
+                               fontSize=9, leading=15, textColor=colors.HexColor('#1e293b'),
+                               alignment=TA_LEFT, wordWrap='CJK', spaceAfter=5),
         'Abstract': ParagraphStyle('Abstract', parent=styles['Normal'], fontName=FONT,
-                                   fontSize=8.5, leading=12.5, textColor=colors.HexColor('#334155'),
-                                   alignment=4, spaceAfter=8),
+                                   fontSize=8.5, leading=14, textColor=colors.HexColor('#334155'),
+                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=6),
         'FigureLegend': ParagraphStyle('FigureLegend', parent=styles['Normal'], fontName=FONT,
                                        fontSize=7.8, leading=11, textColor=colors.HexColor('#475569'),
-                                       spaceBefore=3, spaceAfter=10),
+                                       wordWrap='CJK', spaceBefore=2, spaceAfter=5),
         'Reference': ParagraphStyle('Reference', parent=styles['Normal'], fontName=FONT,
-                                    fontSize=7.5, leading=10.5, textColor=colors.HexColor('#334155'),
-                                    leftIndent=14, firstLineIndent=-14, spaceAfter=3),
+                                    fontSize=7.8, leading=11, textColor=colors.HexColor('#334155'),
+                                    wordWrap='CJK',
+                                    leftIndent=14, firstLineIndent=-14, spaceAfter=2),
     }
 
 
@@ -415,11 +425,11 @@ def compile_manuscript_pdf(output_pdf_path, manuscript_data):
                 ('TOPPADDING', (0, 0), (-1, -1), 3),
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')])]))
-            story.append(KeepTogether([Spacer(1, 4),
+            story.append(KeepTogether([Spacer(1, 2),
                                        P(f"<b>{t_def['caption']}</b>", st['SectionH2']),
-                                       t_flowable, Spacer(1, 8)]))
+                                       t_flowable, Spacer(1, 6)]))
         for fig in sec.get('figures', []):
-            story.append(KeepTogether([Spacer(1, 4),
+            story.append(KeepTogether([Spacer(1, 2),
                                        get_image_flowable(fig['path'], fig.get('width', 5.0 * inch)),
                                        P(f"<b>{fig['id']}. {fig['title']}.</b> {fig['legend']}",
                                          st['FigureLegend'])]))

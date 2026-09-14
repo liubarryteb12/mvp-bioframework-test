@@ -37,7 +37,12 @@ paras = {k: [p.strip() for p in "\n".join(v).split("\n\n") if p.strip()]
          for k, v in sections.items()}
 
 title = paras["标题"][0]
-refs_block = "参考文献\n" + "\n".join(paras["参考文献"])
+# 参考文献：md 中每条占一行、行间无空行 → 原按 "\n\n" 切分会把 8 条并成一段
+#（缺陷："一个引用写完后不换行写另一个"）。此处按行切分为一条一项，
+# 保证 SCI 版式的"一条一段 + 悬挂缩进"。
+REFS = [ln.strip() for ln in sections["参考文献"] if ln.strip()]
+assert len(REFS) >= 5 and all(r.startswith("[") for r in REFS), f"参考文献解析异常：{REFS[:2]}"
+refs_block = "参考文献\n" + "\n".join(REFS)
 decl_block = "\n\n".join(paras["声明"])
 captions = {}
 for p in paras["图注"]:
@@ -132,10 +137,19 @@ def add_declarations_doc(doc):
         doc.add_paragraph(p)
 
 
+def add_ref_entries(doc):
+    """参考文献条目：一条一段 + 悬挂缩进（SCI 常规版式：序号顶格、续行缩进）。"""
+    for ref in REFS:
+        p = doc.add_paragraph(ref)
+        pf = p.paragraph_format
+        pf.left_indent = Inches(0.28)
+        pf.first_line_indent = Inches(-0.28)
+        pf.space_after = Pt(2)
+
+
 def add_refs_doc(doc):
     doc.add_heading("参考文献", level=2)
-    for p in paras["参考文献"]:
-        doc.add_paragraph(p)
+    add_ref_entries(doc)
 
 
 docA_real = Document()
@@ -156,15 +170,23 @@ add_declarations_doc(docA_real)
 add_refs_doc(docA_real)
 docA_real.save(os.path.join(OUT, "manuscript_编辑版.docx"))
 
-# ---------- 图件嵌入尺寸（排版纠错：只缩不放大，保 300dpi 有效分辨率） ----------
-# 教训：曾硬编码 6.3in 宽，3.6–3.9in 的原图被放大 1.6–1.7 倍，有效 dpi 跌破 300（违反作图规范）
+# ---------- 图件嵌入尺寸（只缩不放大；上限 = 正文栏宽，不设更小的人为上限） ----------
+# 教训①：曾硬编码 6.3in 宽，3.6–3.9in 的原图被放大 1.6–1.7 倍，有效 dpi 跌破 300。
+# 教训②（本轮）：PDF 侧又叠了一个 5.0in 上限 → 双栏图（设计 183mm）被压到 127mm
+#   （0.69×），图内标注挤作一团、字迹重叠。现改为"上限 = 正文栏宽"：
+#   双栏图只做 183→172mm 的轻微等比缩放（0.94×），不再过度压缩。
 from PIL import Image as PILImage
 
+PAGE_W_PT = 595.276                                # A4 宽（pt）
+PDF_COL_W_IN = (PAGE_W_PT - 2 * 54) / 72.0         # 正文栏宽 = 171.9 mm = 6.767 in
+DOCX_COL_W_IN = 6.20                               # docx（A4/Letter + 常规页边距）保守栏宽
 
-def fig_width_in(n, max_in=6.3):
+
+def fig_width_in(n, max_in=PDF_COL_W_IN):
+    """按 300dpi 自然尺寸取宽；仅在超出栏宽时才缩（只缩不放大）。"""
     with open(FIGS[n], "rb") as f:
         im = PILImage.open(io.BytesIO(f.read()))
-    return min(im.size[0] / 300.0, max_in)   # 300dpi 自然尺寸；超宽才缩
+    return min(im.size[0] / 300.0, max_in)
 
 
 # ---------- 真 docx：排版核对版（B，纯图片+图注） ----------
@@ -174,14 +196,13 @@ for n in sorted(captions):
     pic_p = docB_real.add_paragraph()
     pic_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pic_p.paragraph_format.keep_with_next = True   # 图与图注绑定，防跨页错位
-    pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n)))
+    pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n, DOCX_COL_W_IN)))
     cap_p = docB_real.add_paragraph()
     cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = cap_p.add_run(f"图 {n}"); r.bold = True
     cap_p.add_run("：" + captions[n].split("：", 1)[1])
 docB_real.add_heading("参考文献", level=2)
-for p in paras["参考文献"]:
-    docB_real.add_paragraph(p)
+add_ref_entries(docB_real)
 docB_real.save(os.path.join(OUT, "manuscript_排版核对版.docx"))
 
 # ---------- 真 docx：完整版（BMC 式全稿：正文+图随文嵌+图注+声明+参考文献，一份装全） ----------
@@ -199,7 +220,7 @@ for sec in body_order:
                 pic_p = docC.add_paragraph()
                 pic_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 pic_p.paragraph_format.keep_with_next = True
-                pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n)))
+                pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n, DOCX_COL_W_IN)))
                 cap_p = docC.add_paragraph()
                 cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 r = cap_p.add_run(f"图 {n}"); r.bold = True
@@ -222,7 +243,7 @@ from reportlab.lib.units import inch as _inch
 figs_payload = [{"id": f"图 {n}", "title": figtitles.get(n, ""),
                  "legend": captions[n].split("：", 1)[1],
                  "path": FIGS[n],
-                 "width": min(fig_width_in(n), 5.0) * _inch}   # 自然尺寸，只缩不放大
+                 "width": fig_width_in(n) * _inch}     # 自然尺寸（上限=正文栏宽），只缩不放大
                 for n in sorted(captions)]
 TE.compile_manuscript_pdf(
     os.path.join(OUT, "manuscript_gse31210.pdf"),
@@ -235,7 +256,7 @@ TE.compile_manuscript_pdf(
                    **({"figures": [f for f in figs_payload]} if sec == "结果" else {})}
                   for i, sec in enumerate(body_order, 1)],
      "declarations": DECL_SUBS,
-     "references": paras["参考文献"]})
+     "references": REFS})
 
 print("导出完成 →", OUT)
 for f in sorted(os.listdir(OUT)):
