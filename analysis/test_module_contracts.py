@@ -263,7 +263,12 @@ def test_m19_extract_baseline_orders_time_hazard_correctly():
 
 
 def test_m19_run_end_to_end(tmp_path):
-    """端到端冒烟：合成数据跑通 run()，产出 Cox 表 / 列线图 / RFS 换算表。"""
+    """端到端冒烟：合成数据跑通 run()，产出 Cox 表 / 列线图（四格式）/ RFS 换算表。
+
+    回归锁定（云端 run 34770322198 实证）：列线图曾用中文标签，DejaVu Sans 无中日韩
+    字形 → 图上渲染成豆腐块；故此处捕获 matplotlib "Glyph ... missing" 告警并断言为空。
+    """
+    import warnings
     m19 = _load_plugin("m19_nomogram.py")
     rng = np.random.default_rng(7)
     n = 120
@@ -276,10 +281,16 @@ def test_m19_run_end_to_end(tmp_path):
            "tt": tt, "ev": ev, "config": {}}
     out = str(tmp_path / "m19")
     os.makedirs(out, exist_ok=True)
-    msg = m19.run(ctx, out)
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        msg = m19.run(ctx, out)
+    missing = [str(w.message) for w in rec if "Glyph" in str(w.message)]
+    assert not missing, f"图内文本缺字形（会渲染成豆腐块）：{missing}"
     assert "n=" in msg, msg
-    for f in ("M19_Cox系数表.csv", "M19_列线图.png",
-              "M19_总分_1825天无复发生存.csv"):
+    for f in ("M19_Cox系数表.csv", "M19_总分_1825天无复发生存.csv"):
+        assert os.path.exists(os.path.join(out, f)), f"缺失产出 {f}"
+    for ext in ("png", "pdf", "tiff", "jpg"):        # §F 四格式齐全
+        f = f"M19_列线图.{ext}"
         assert os.path.exists(os.path.join(out, f)), f"缺失产出 {f}"
 
 

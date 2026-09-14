@@ -118,6 +118,61 @@ def _covariates(ctx, samples):
     return df
 
 
+def _save_nomogram(pts, coefs, ranges, n, out):
+    """列线图（作图规范 v1.0）：双栏网格 + 英文标签 + 四格式导出。
+
+    修复（云端 run 34770322198 实证）：图内曾写中文"全范围=x 分"，而图中字体为
+    DejaVu Sans（无中日韩字形）→ 云端日志反复报 `Glyph ... missing`，图上渲染成豆腐块；
+    且旧实现只出 PNG、title/label 字号 9/8pt 超出规范区间 [5,7]，画布未锁栏宽。
+    """
+    import io
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from PIL import Image
+
+    nrow = len(pts)
+    fig, ax = plt.subplots(figsize=(183.0 / 25.4, 0.9 + 0.55 * nrow), constrained_layout=True)
+    for i, (c, v) in enumerate(pts.items()):
+        y = nrow - i
+        ax.hlines(y, 0, 100, color="#334155", lw=1.0)
+        for tick in range(0, 101, 10):
+            ax.vlines(tick, y - 0.08, y + 0.08, color="#334155", lw=0.7)
+        ax.text(-2, y, f"{c}\n[HR {np.exp(coefs[c]):.2f}]", ha="right", va="center", fontsize=7)
+        lo, hi = ranges[c]
+        ax.text(0, y + 0.22, f"{lo:.3g}", fontsize=6, ha="center")
+        ax.text(100, y + 0.22, f"{hi:.3g}", fontsize=6, ha="center")
+        ax.text(50, y - 0.3, f"range = {v['range_points']:.0f} pts", fontsize=6,
+                ha="center", color="#0072B2")
+    ax.set_xlim(-30, 110); ax.set_ylim(0.3, nrow + 0.8)
+    ax.set_yticks([])
+    ax.set_xlabel("Points", fontsize=7)
+    ax.set_title(f"Simplified nomogram (Cox; n={int(n)})", fontsize=7)
+    for s in ("top", "right", "left"):
+        ax.spines[s].set_visible(False)
+
+    stem = os.path.join(out, "M19_列线图")
+    for ext, kw in [("pdf", {}), ("tiff", {}), ("png", {}),
+                    ("jpg", dict(pil_kwargs={"quality": 95}))]:
+        p = f"{stem}.{ext}"
+        fig.savefig(p, dpi=300, **kw)
+        if ext in ("png", "tiff"):                 # C-6 色彩模式：RGB（matplotlib 默认 RGBA）
+            with open(p, "rb") as f:
+                data = f.read()
+            im = Image.open(io.BytesIO(data))
+            if im.mode != "RGB":
+                bg = Image.new("RGB", im.size, (255, 255, 255))
+                bg.paste(im, mask=im.split()[-1] if im.mode in ("RGBA", "LA") else None)
+                buf = io.BytesIO()
+                bg.save(buf, format="TIFF" if ext == "tiff" else "PNG", dpi=(300, 300))
+                tmp = p + ".tmp"
+                with open(tmp, "wb") as f:
+                    f.write(buf.getvalue())
+                os.replace(tmp, p)
+                im.close()
+    plt.close(fig)
+
+
 def run(ctx, out):
     """模块入口：Cox 系数表 + 简化列线图 + 总分-5年无复发生存表。"""
     from statsmodels.duration.hazard_regression import PHReg
@@ -163,30 +218,7 @@ def run(ctx, out):
     conv.to_csv(os.path.join(out, f"M19_总分_{int(horizon_days)}天无复发生存.csv"),
                 index=False, encoding="utf-8-sig")
 
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    n = len(pts)
-    fig, ax = plt.subplots(figsize=(7.2, 0.9 + 0.55 * n), dpi=300)
-    for i, (c, v) in enumerate(pts.items()):
-        y = n - i
-        ax.hlines(y, 0, 100, color="#334155", lw=1.0)
-        for tick in range(0, 101, 10):
-            ax.vlines(tick, y - 0.08, y + 0.08, color="#334155", lw=0.7)
-        ax.text(-2, y, f"{c}\n[HR {np.exp(coefs[c]):.2f}]", ha="right", va="center", fontsize=7)
-        lo, hi = ranges[c]
-        ax.text(0, y + 0.22, f"{lo:.3g}", fontsize=6, ha="center")
-        ax.text(100, y + 0.22, f"{hi:.3g}", fontsize=6, ha="center")
-        ax.text(50, y - 0.3, f"全范围={v['range_points']:.0f} 分", fontsize=6,
-                ha="center", color="#0072B2")
-    ax.set_xlim(-30, 110); ax.set_ylim(0.3, n + 0.8)
-    ax.set_yticks([]); ax.set_xlabel("Points", fontsize=8)
-    ax.set_title(f"Simplified nomogram (Cox; n={int(mask.sum())})", fontsize=9)
-    for s in ("top", "right", "left"):
-        ax.spines[s].set_visible(False)
-    fig.tight_layout()
-    fig.savefig(os.path.join(out, "M19_列线图.png"), dpi=300)
-    plt.close(fig)
+    _save_nomogram(pts, coefs, ranges, int(mask.sum()), out)
 
     sig = [c for c in coefs if float(cox.pvalues[list(coefs).index(c)]) < 0.05]
     return (f"n={int(mask.sum())}；H0({int(horizon_days)}d)={h0:.3f}；"
