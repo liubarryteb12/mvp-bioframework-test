@@ -184,9 +184,11 @@ jobs:
           echo "CLAIM_AUDIT_EXIT=${PIPESTATUS[0]}   # 0=结论全部被结果支撑（用户硬要求）"
           # 排版：CJK 字体必须**先装好再编译**（装在编译之后 → 回落 base-14 → 中文整段丢弃，
           # run 34796985194 实证）；且须用 **TrueType 轮廓**的字体——Noto CJK 是 CFF/PostScript
-          # 轮廓，ReportLab 报 "postscript outlines are not supported"（run 34815434564 实证），
-          # 故改用文泉驿正黑 / Droid Fallback（均为 TrueType，可真嵌入）。
-          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-wqy-zenhei fonts-droid-fallback
+          # 轮廓，ReportLab 报 "postscript outlines are not supported"（run 34815434564 实证）。
+          # SCI 版式（2026-09-14）：西文衬线 Liberation Serif（Times 度量兼容）+ 中文宋体类
+          # AR PL UMing（明体，TrueType），文泉驿正黑/Droid 作兜底（均可真嵌入）。
+          sudo apt-get update -qq && sudo apt-get install -y -qq \
+            fonts-liberation fonts-arphic-uming fonts-wqy-zenhei fonts-droid-fallback
           python export_manuscript.py 2>&1 | tee export_stdout.txt
           echo "EXIT=${PIPESTATUS[0]}"
           # PDF 由 SCI 预印本排版引擎（typeset_engine，内化自 09.SCI文章排版参考）生成；

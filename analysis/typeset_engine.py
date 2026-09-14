@@ -40,29 +40,37 @@ def _mpl_ttf(name):
         return ""
 
 
-# 候选字体（优先级从上到下）：CJK 覆盖优先，逐个探测**存在性**再注册；全部失败即抛错。
+# 候选字体（优先级从上到下）：逐个探测**存在性**再注册；全部失败即抛错。
 # 反面教训（run 34796985194）：原实现只探一个 Noto 路径，探不到就静默回落 base-14
 # Helvetica —— base-14 既不嵌入、也无 CJK，导致中文正文被整段丢弃（PDF 中文字符数=0）。
+#
+# SCI 版式选型（用户 2026-09-14 反馈"不像 SCI 排版"）：**拉丁衬线作主字体**，
+# 中文由宋体类经 `_wrap()` 逐段承接 —— 西文/数字/符号用 Times 类衬线、中文用宋体，
+# 这正是逐字回退机制的另一主用途（无衬线黑体是网页版式，不是 SCI 版式）。
 _FONT_CANDIDATES = [
-    # ① TrueType 轮廓的中文字体（ReportLab 可嵌入）——首选
+    # ⓪ 拉丁衬线主字体
+    ("C:/Windows/Fonts/times.ttf", "C:/Windows/Fonts/timesbd.ttf", None),        # Windows Times
+    ("/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
+     "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf", None),     # 云端（Times 度量兼容）
+    # ① 中文宋体类（衬线；粗体由黑体承接）
+    ("C:/Windows/Fonts/simsun.ttc", "C:/Windows/Fonts/simhei.ttf", 0),           # Windows 宋体
+    ("/usr/share/fonts/truetype/arphic/uming.ttc",
+     "/usr/share/fonts/truetype/arphic/uming.ttc", 0),                           # 云端 AR PL UMing（明体）
+    # ② 其他可嵌入 CJK / 备用
     ("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
      "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 0),
     ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
      "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", None),
-    ("/usr/share/fonts/truetype/arphic/uming.ttc",
-     "/usr/share/fonts/truetype/arphic/uming.ttc", 0),
+    ("C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/msyhbd.ttc", 0),
     ("/usr/share/fonts/truetype/arphic/ukai.ttc",
      "/usr/share/fonts/truetype/arphic/ukai.ttc", 0),
-    # Windows（本机预检）
-    ("C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/msyhbd.ttc", 0),
-    ("C:/Windows/Fonts/simsun.ttc", "C:/Windows/Fonts/simhei.ttf", 0),
     # macOS
     ("/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/PingFang.ttc", 0),
-    # ② Noto CJK：**CFF/PostScript 轮廓，ReportLab 报 "postscript outlines are not
+    # ③ Noto CJK：**CFF/PostScript 轮廓，ReportLab 报 "postscript outlines are not
     #    supported"**（run 34815434564 实证）。保留在末尾，只为给出明确的失败信息。
     ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
      "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc", 0),
-    # ③ 兜底：DejaVu（嵌入 OK、**无 CJK** —— 含中文的稿件会被构建后自检拦下）
+    # ④ 兜底：DejaVu（嵌入 OK；符号覆盖广——↑→≥ 等宋体缺的字形由此承接）
     (_mpl_ttf("DejaVuSans.ttf"), _mpl_ttf("DejaVuSans-Bold.ttf"), None),
 ]
 
@@ -214,6 +222,33 @@ class NumberedCanvas(canvas.Canvas):
             super().showPage()
         super().save()
 
+    def _draw_mixed(self, text, x, y, size):
+        """按字符覆盖**分段选字体**绘制（canvas.drawString 不走 Paragraph 的 <font> 回退）。
+
+        教训（2026-09-14）：主字体换成 Times 后，页眉里的中文标题（running_header）
+        被静默画丢 —— 每页少 24 字 × 4 页 ≈ 92 字。Paragraph 有 `_wrap()` 承接，
+        canvas 没有，必须在这里做同款分段。
+        """
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+        cur, run, cx = None, [], x
+
+        def flush():
+            nonlocal cx
+            if run:
+                s = "".join(run)
+                self.setFont(cur, size)
+                self.drawString(cx, y, s)
+                cx += stringWidth(s, cur, size)
+                del run[:]
+
+        for ch in text:
+            nm = _font_name_for(ch) or FONT
+            if nm != cur:
+                flush()
+                cur = nm
+            run.append(ch)
+        flush()
+
     def draw_header_footer(self, page_count):
         self.saveState()
         self.setFont(FONT, 8)
@@ -221,7 +256,7 @@ class NumberedCanvas(canvas.Canvas):
         page_w, page_h = A4
         margin = 54
         if self._pageNumber > 1:
-            self.drawString(margin, page_h - 36, HEADER_TEXT)
+            self._draw_mixed(HEADER_TEXT, margin, page_h - 36, 8)
             self.setStrokeColor(colors.HexColor("#cbd5e1"))
             self.setLineWidth(0.5)
             self.line(margin, page_h - 42, page_w - margin, page_h - 42)
@@ -243,41 +278,44 @@ def get_image_flowable(image_path, target_width=5.0 * inch):
 
 
 def setup_typography_styles():
-    """版式样式表。
+    """版式样式表（对齐常规 SCI 单栏版式，参照 07.参考文献 Wen 2022 / BMC Cancer）。
 
-    两项针对中文排版的关键设定（用户 2026-09-14 反馈"中/西文/符号间有明显空隙"）：
-      ① `wordWrap="CJK"`：ReportLab 默认按空格断行，中文整段会被当成一个"长单词"，
-         断行与对齐都会失控；
-      ② 正文**不用两端对齐**（`alignment=TA_LEFT`）：中文没有空格可供拉伸，
-         TA_JUSTIFY 会把余量塞进**字与字之间**，视觉上就是"字间空隙/空白"。
+    三条硬规矩（前车之鉴均注明）：
+      ① `wordWrap="CJK"` 必开：否则中文整段被当成一个"长单词"，断行与对齐失控；
+      ② 正文**两端对齐**（TA_JUSTIFY）必须与 ① 配套 —— 无 CJK 断行的 justify 会把
+         余量塞进字间（用户 2026-09-14"字间空隙"的根因）；CJK 断行 + 两端对齐才是
+         中文期刊的标准做法；
+      ③ **衬线字体**（西文 Times/Liberation Serif、中文宋体）+ 黑色正文 —— 无衬线黑体
+         配浅灰字色是网页版式，不是 SCI 版式（用户 2026-09-14 第二轮反馈"不像 SCI"）。
     """
     styles = getSampleStyleSheet()
     return {
         'DocTitle': ParagraphStyle('DocTitle', parent=styles['Normal'], fontName=FONTB,
-                                   fontSize=15, leading=20, textColor=colors.HexColor('#0f172a'),
-                                   alignment=1, wordWrap='CJK', spaceAfter=10),
+                                   fontSize=15, leading=21, textColor=colors.black,
+                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=8),
         'DocAuthors': ParagraphStyle('DocAuthors', parent=styles['Normal'], fontName=FONT,
-                                     fontSize=9, leading=13, textColor=colors.HexColor('#334155'),
-                                     alignment=1, wordWrap='CJK', spaceAfter=12),
+                                     fontSize=10, leading=14, textColor=colors.black,
+                                     alignment=TA_LEFT, wordWrap='CJK', spaceAfter=10),
         'SectionH1': ParagraphStyle('SectionH1', parent=styles['Normal'], fontName=FONTB,
-                                    fontSize=11.5, leading=15, textColor=colors.HexColor('#0f172a'),
-                                    wordWrap='CJK', spaceBefore=12, spaceAfter=5, keepWithNext=True),
+                                    fontSize=12, leading=16, textColor=colors.black,
+                                    wordWrap='CJK', spaceBefore=14, spaceAfter=5, keepWithNext=True),
         'SectionH2': ParagraphStyle('SectionH2', parent=styles['Normal'], fontName=FONTB,
-                                    fontSize=10, leading=13.5, textColor=colors.HexColor('#0072B2'),
-                                    wordWrap='CJK', spaceBefore=8, spaceAfter=3, keepWithNext=True),
+                                    fontSize=10.5, leading=14, textColor=colors.black,
+                                    wordWrap='CJK', spaceBefore=10, spaceAfter=3, keepWithNext=True),
         'Body': ParagraphStyle('Body', parent=styles['Normal'], fontName=FONT,
-                               fontSize=9, leading=15, textColor=colors.HexColor('#1e293b'),
-                               alignment=TA_LEFT, wordWrap='CJK', spaceAfter=5),
+                               fontSize=10, leading=14.5, textColor=colors.black,
+                               alignment=TA_JUSTIFY, wordWrap='CJK', spaceAfter=5),
         'Abstract': ParagraphStyle('Abstract', parent=styles['Normal'], fontName=FONT,
-                                   fontSize=8.5, leading=14, textColor=colors.HexColor('#334155'),
-                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=6),
+                                   fontSize=9.5, leading=13.5, textColor=colors.black,
+                                   alignment=TA_JUSTIFY, wordWrap='CJK', spaceAfter=5),
         'FigureLegend': ParagraphStyle('FigureLegend', parent=styles['Normal'], fontName=FONT,
-                                       fontSize=7.8, leading=11, textColor=colors.HexColor('#475569'),
-                                       wordWrap='CJK', spaceBefore=2, spaceAfter=5),
+                                       fontSize=9, leading=12, textColor=colors.black,
+                                       alignment=TA_JUSTIFY, wordWrap='CJK',
+                                       spaceBefore=2, spaceAfter=6),
         'Reference': ParagraphStyle('Reference', parent=styles['Normal'], fontName=FONT,
-                                    fontSize=7.8, leading=11, textColor=colors.HexColor('#334155'),
+                                    fontSize=9, leading=11.5, textColor=colors.black,
                                     wordWrap='CJK',
-                                    leftIndent=14, firstLineIndent=-14, spaceAfter=2),
+                                    leftIndent=16, firstLineIndent=-16, spaceAfter=2),
     }
 
 

@@ -208,15 +208,20 @@ try:
     sel = pd.concat([_up.assign(grp="Up-regulated"), _dn.assign(grp="Down-regulated")])
     sel = sel.sort_values("Adjusted P-value").groupby("grp").head(8)
     sel = sel.sort_values(["grp", "Adjusted P-value"], ascending=[True, False]).reset_index(drop=True)
-    fig, ax = new_fig(COL2, 3.3)                      # 双栏宽：容纳长通路名（D2）
-    ypos = np.arange(len(sel))
+    # 纵坐标槽位按**标签实际行数**分配：wrap 后各标签 1–3 行不等，固定行距会令多行
+    # 标签互相叠压（用户 2026-09-14 反馈"纵坐标文字叠起来了"的根因）。
+    labs = [wrap(t, 42) for t in sel["Term"]]
+    ln = np.array([l.count("\n") + 1 for l in labs], float)
+    ypos = np.concatenate([[0.0], np.cumsum(ln)])[:-1]   # 行 i 的起点 = 前 i 个标签占的总行数
+    # 图高随总行数自适应：正文区 ≥ 总行数 × 行高（1.5 倍 FS_SMALL），另留标题/图例余量
+    fig, ax = new_fig(COL2, max(3.3, float(ln.sum()) * FS_SMALL * 1.5 / 72 + 1.05))
     for grp, col in [("Up-regulated", VERM), ("Down-regulated", BLUE)]:
         s = (sel["grp"] == grp).to_numpy()
         ax.scatter(sel.loc[s, "Adjusted P-value"], ypos[s], s=26, c=col, linewidths=0,
                    label=f"{grp} genes (n = {int(s.sum())})")
     ax.set_yticks(ypos)
-    ax.set_yticklabels([wrap(t, 38) for t in sel["Term"]], fontsize=FS_SMALL)
-    ax.set_ylim(len(sel) - 0.4, -0.6)
+    ax.set_yticklabels(labs, fontsize=FS_SMALL)
+    ax.set_ylim(float(ypos[-1] + ln[-1]) - 0.35, -0.75)
     ax.set_xscale("log")
     ax.set_xlabel("Adjusted P-value (Benjamini–Hochberg)")
     ax.set_title("GO/KEGG enrichment of differentially expressed genes (Enrichr)")
