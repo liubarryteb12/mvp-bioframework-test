@@ -311,15 +311,17 @@ def setup_typography_styles():
         'SectionH2': ParagraphStyle('SectionH2', parent=styles['Normal'], fontName=FONTB,
                                     fontSize=10.5, leading=14, textColor=colors.black,
                                     wordWrap='CJK', spaceBefore=10, spaceAfter=3, keepWithNext=True),
+        # 注：正文由 `kinsoku()` 预折行（`<br/>` 硬换行），硬换行后两端对齐失效，
+        #     故这三个样式统一 TA_LEFT —— 与 docx 投稿稿（左对齐，用户确认"没问题"）一致。
         'Body': ParagraphStyle('Body', parent=styles['Normal'], fontName=FONT,
                                fontSize=10, leading=14.5, textColor=colors.black,
-                               alignment=TA_JUSTIFY, wordWrap='CJK', spaceAfter=5),
+                               alignment=TA_LEFT, wordWrap='CJK', spaceAfter=5),
         'Abstract': ParagraphStyle('Abstract', parent=styles['Normal'], fontName=FONT,
                                    fontSize=9.5, leading=14, textColor=colors.black,
-                                   alignment=TA_JUSTIFY, wordWrap='CJK', spaceAfter=5),
+                                   alignment=TA_LEFT, wordWrap='CJK', spaceAfter=5),
         'FigureLegend': ParagraphStyle('FigureLegend', parent=styles['Normal'], fontName=FONT,
                                        fontSize=8.5, leading=12, textColor=colors.black,
-                                       alignment=TA_JUSTIFY, wordWrap='CJK',
+                                       alignment=TA_LEFT, wordWrap='CJK',
                                        spaceBefore=2, spaceAfter=6),
         'Reference': ParagraphStyle('Reference', parent=styles['Normal'], fontName=FONT,
                                     fontSize=8.5, leading=12, textColor=colors.black,
@@ -397,9 +399,118 @@ def _count_solid_boxes(path, dpi=150, dark=50, lo=6, hi=26, fill=0.85):
     return n
 
 
-def P(text, style):
-    """构造 Paragraph：自动把主字体缺字形的字符交给备用字体（防 .notdef 黑框）。"""
-    return Paragraph(_wrap(text), style)
+# ── 中文避头尾（kinsoku）────────────────────────────────────────────────────
+# 行首禁出现的字符（收尾标点/闭括号）
+_NO_LINE_START = "、，。；：！？）」』】》〉〕｝］,.!?:;)]}…～·—。！"
+# 行尾禁出现的字符（起始标点/开括号）
+_NO_LINE_END = "（「『【《〈〔｛［([{<"
+_CJK_RE = re.compile(r"[\u2e80-\u9fff\u3000-\u303f\uff00-\uffef]")
+
+# 正文可用宽度（版心宽，pt）；由 compile_manuscript_pdf 建立 doc 后写入
+_AVAIL_W = 0.0
+
+
+def _char_w(ch, size):
+    from reportlab.pdfbase import pdfmetrics
+    try:
+        return pdfmetrics.stringWidth(ch, _font_name_for(ch) or FONT, size)
+    except Exception:
+        return size * 0.5
+
+
+def kinsoku(text, style, avail_width):
+    """中文**避头尾**预折行：按可用宽度自行折行，行间插 `<br/>`。
+
+    问题（用户 2026-09-14 反馈"标点符号位置错误"，docx 正常、PDF 异常）：
+    ReportLab 的 `wordWrap='CJK'` 会在**任意字符间**断行 → 中文标点（，。；：）等）
+    可能落到**行首**，视觉上就是"标点位置错误"。docx 由 Word 排版，自带避头尾，故正常。
+
+    做法：按字体实测宽度贪心折行，并施加禁则 ——
+      ① 行首不出现 `_NO_LINE_START`；② 行尾不出现 `_NO_LINE_END`。
+    冲突时优先"挤入"（允许 ≤6% 微量超出），否则"推出"（把本行末字符与标点一并下移）。
+    """
+    if not text or avail_width <= 0:
+        return text
+    # ① 切分不可分单元：标签整体 / 单个 CJK 字符 / 连续非 CJK 片段
+    toks, i = [], 0
+    while i < len(text):
+        if text[i] == "<" and ">" in text[i:]:
+            j = text.index(">", i) + 1
+            toks.append(text[i:j]); i = j
+        elif _CJK_RE.match(text[i]):
+            toks.append(text[i]); i += 1
+        else:
+            j = i + 1
+            while j < len(text) and text[j] != "<" and not _CJK_RE.match(text[j]):
+                j += 1
+            toks.append(text[i:j]); i = j
+    # ② 超长片段（如长 URL / 长英文单词）再切细，避免整段溢出
+    _fine = []
+    for tk in toks:
+        if tk.startswith("<") or _char_w(tk, style.fontSize) <= avail_width:
+            _fine.append(tk)
+        else:
+            _buf = ""
+            for c in tk:
+                if _buf and _char_w(_buf + c, style.fontSize) > avail_width:
+                    _fine.append(_buf); _buf = c
+                else:
+                    _buf += c
+            if _buf:
+                _fine.append(_buf)
+    toks = _fine
+
+    def _w(s):
+        return 0.0 if s.startswith("<") else sum(_char_w(c, style.fontSize) for c in s)
+
+    lines, cur, cur_w = [], [], 0.0
+    pending_break = False                # 原文硬换行（<br/>）挂起：若下一 token 是禁则
+    # 余量 1.5%：实测宽度略小于 ReportLab 实际渲染宽度（缺字距/bold 开销），
+    # 片段一旦超框会被二次折行，把末尾标点甩成"孤标点行"（2026-09-14 实测）。
+    limit = avail_width * 0.985
+    for tk in toks:
+        if tk.lower() in ("<br/>", "<br>"):
+            pending_break = True
+            continue
+        if pending_break:
+            if tk[:1] in _NO_LINE_START:                    # 并入本行行尾
+                cur.append(tk); cur_w += _w(tk)
+            lines.append("".join(cur)); cur, cur_w, pending_break = [], 0.0, False
+            if tk[:1] in _NO_LINE_START:
+                continue
+        if not cur and tk[:1] in _NO_LINE_START and lines:
+            lines[-1] = lines[-1] + tk          # 空行遇禁则标点 → 回挂上一行行尾
+            continue
+        w = _w(tk)
+        if cur and cur_w + w > limit:
+            if tk[:1] in _NO_LINE_START and len(cur) > 1:   # 禁则①：推出（末字符与标点一起下移）
+                mv = cur.pop()
+                # 末字符本身也是标点时须**整串标点一起下移**（否则下一行仍以标点开头，
+                # 实测出现行首"）；"——2026-09-14）
+                while len(cur) > 1 and mv[:1] in _NO_LINE_START:
+                    mv = cur.pop() + mv
+                lines.append("".join(cur))
+                cur, cur_w = [mv, tk], _w(mv) + w
+            elif cur[-1][-1:] in _NO_LINE_END and len(cur) > 1:   # 禁则②：开括号不下沉行尾
+                mv = cur.pop()
+                lines.append("".join(cur))
+                cur, cur_w = [mv, tk], _w(mv) + w
+            else:
+                lines.append("".join(cur)); cur, cur_w = [tk], w
+        else:
+            cur.append(tk); cur_w += w
+    if cur:
+        lines.append("".join(cur))
+    return "<br/>".join(lines)
+
+
+def P(text, style, width=None):
+    """构造 Paragraph：先按**可用宽度**做中文避头尾折行，再把缺字形字符交给备用字体。
+
+    `width` 省略时用版心宽（正文）；表格单元格须传**列宽**，否则预折行的行宽与单元格
+    不符，会被 ReportLab 二次折行，标点重新落到行首（2026-09-14 实测）。
+    """
+    return Paragraph(_wrap(kinsoku(text, style, _AVAIL_W if width is None else width)), style)
 
 
 def _collect_text(md):
@@ -436,12 +547,13 @@ def assert_glyph_coverage(md):
 
 def compile_manuscript_pdf(output_pdf_path, manuscript_data):
     """编译学术 PDF（规范 §四；增补声明节与可配置页眉）。"""
-    global HEADER_TEXT
+    global HEADER_TEXT, _AVAIL_W
     HEADER_TEXT = manuscript_data.get("running_header", HEADER_TEXT)
     doc = SimpleDocTemplate(output_pdf_path, pagesize=A4, leftMargin=MARGIN_PT, rightMargin=MARGIN_PT,
                             topMargin=MARGIN_PT, bottomMargin=MARGIN_PT,
                             title=manuscript_data.get("title", ""),
                             author=manuscript_data.get("authors", ""))
+    _AVAIL_W = doc.width          # 版心宽：供 kinsoku 预折行使用
     st = setup_typography_styles()
     story = [P(manuscript_data['title'], st['DocTitle']),
              P(manuscript_data['authors'], st['DocAuthors']),
@@ -458,9 +570,11 @@ def compile_manuscript_pdf(output_pdf_path, manuscript_data):
             story.append(P(para, st['Body']))
         if 'table' in sec:
             t_def = sec['table']
-            # 单元格含主字体缺字形字符时，必须转 Paragraph 才能逐字换字体（否则仍画黑框）
-            cells = [[P(str(c), st['Body']) if _needs_alt(str(c)) else c for c in row]
-                     for row in t_def['data']]
+            # 单元格含主字体缺字形字符时，必须转 Paragraph 才能逐字换字体（否则仍画黑框）；
+            # 预折行**必须按列宽**算（此前用整版宽度 → 单元格内溢出被二次折行 → 标点落行首）
+            _cw = t_def.get('col_widths') or [doc.width / max(1, len(t_def['data'][0]))] * len(t_def['data'][0])
+            cells = [[P(str(c), st['Body'], _cw[j] - 8) if _needs_alt(str(c)) else c
+                      for j, c in enumerate(row)] for row in t_def['data']]
             t_flowable = Table(cells, colWidths=t_def.get('col_widths'))
             t_flowable.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f1f5f9')),

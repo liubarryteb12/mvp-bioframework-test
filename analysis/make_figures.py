@@ -22,6 +22,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 
 SEED = 20260910
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,11 +60,45 @@ plt.rcParams.update({
 })
 
 
-# ══════════════════════════ 规范层（D1–D6 共用）══════════════════════════════
+# ══════════════════════════ 规范层（D1–D8 共用）══════════════════════════════
 def new_fig(w=COL1, h=H_SINGLE):
-    """D2/D6：按栏宽网格出图；constrained_layout 保证文本不出框、图间可无缝排布。"""
-    assert abs(w - COL1) < 1e-3 or abs(w - COL2) < 1e-3, "宽度须落在栏宽网格（89/183mm）"
-    return plt.subplots(figsize=(w, h), constrained_layout=True)
+    """D2/D6：按栏宽网格出图；constrained_layout 保证文本不出框、图间可无缝排布。
+    同时限制刻度数量（D8 防御：图例移到右侧后绘图区变窄，刻度标签易互相重叠）。"""
+    assert abs(w - COL1) < 1e-3 or abs(w - COL2) < 1e-3, "宽度须落在栏宽网格（85/170mm）"
+    fig, ax = plt.subplots(figsize=(w, h), constrained_layout=True)
+    ax.xaxis.set_major_locator(mticker.MaxNLocator(nbins=4))
+    ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=4))
+    return fig, ax
+
+
+def _place_labels(ax, pts, labels, fontsize=FS_SMALL, italic=True):
+    """D7/D8：图内点标签的**像素级贪心避让**。
+
+    逐个标签尝试 8 个候选偏移，取第一个"完全落在坐标轴框内 且 不与已放标签相交"的位置；
+    全部候选冲突则**放弃该标签**（宁缺毋压），返回实际放置条数。
+    """
+    fig = ax.get_figure()
+    placed, n = [], 0
+    for (x, y), s in zip(pts, labels):
+        got = None
+        for dx, dy, va in [(0, 6, "bottom"), (0, -6, "top"), (8, 2, "bottom"),
+                           (-8, 2, "bottom"), (0, 16, "bottom"), (0, -16, "top"),
+                           (13, -10, "top"), (-13, -10, "top")]:
+            ann = ax.annotate(s, (x, y), xytext=(dx, dy), textcoords="offset points",
+                              ha="center", va=va, fontsize=fontsize,
+                              style="italic" if italic else "normal")
+            fig.canvas.draw()
+            r = fig.canvas.get_renderer()
+            ab, tb = ax.get_window_extent(r), ann.get_window_extent(r)
+            ok = (tb.x0 >= ab.x0 and tb.x1 <= ab.x1 and tb.y0 >= ab.y0
+                  and tb.y1 <= ab.y1
+                  and all(_ov_area(tb, pb) <= 0.0 for pb in placed))
+            if ok:
+                got = ann; placed.append(tb); break
+            ann.remove()
+        if got is not None:
+            n += 1
+    return n
 
 
 def wrap(s, n):
@@ -72,16 +107,17 @@ def wrap(s, n):
     return "\n".join(textwrap.wrap(s, n)) if len(s) > n else s
 
 
-def legend_outside(ax, ncol=2):
-    """D1/D3：图例置于坐标轴外下方（figure legend，loc=outside lower center），
-    由 constrained_layout 预留空间 → 永不覆盖数据、也不出画布；条目上限 6。"""
+def legend_outside(ax, ncol=1):
+    """D1/D3：图例置于**图右侧**（figure legend，loc="outside right center"），
+    由 constrained_layout 预留空间 → 永不覆盖数据、也不出画布；条目上限 6。
+    （2026-09-14 用户反馈"图例没在右边"：SCI 常规为右侧竖排单列图例。）"""
     hs, ls = ax.get_legend_handles_labels()
     if not hs:
         return
     assert len(hs) <= 6, f"D3 违规：图例 {len(hs)} 条 > 6"
-    ax.get_figure().legend(hs, ls, frameon=False, loc="outside lower center",
-                           ncol=min(ncol, len(hs)), handlelength=1.3,
-                           handletextpad=0.5, columnspacing=1.2)
+    ax.get_figure().legend(hs, ls, frameon=False, loc="outside right center",
+                           ncol=ncol, handlelength=1.3,
+                           handletextpad=0.5, columnspacing=1.2, labelspacing=0.5)
 
 
 def panel(ax, letter):
@@ -92,6 +128,20 @@ def panel(ax, letter):
 
 def _overlap(b1, b2):
     return b1.x0 < b2.x1 and b2.x0 < b1.x1 and b1.y0 < b2.y1 and b2.y0 < b1.y1
+
+
+def _ov_area(b1, b2):
+    """两 bbox 相交面积（pt²）——用于容忍 1pt 级的擦边，只报真实重叠。"""
+    dx = min(b1.x1, b2.x1) - max(b1.x0, b2.x0)
+    dy = min(b1.y1, b2.y1) - max(b1.y0, b2.y0)
+    return dx * dy if dx > 0 and dy > 0 else 0.0
+
+
+def _texts(ax):
+    """该轴上全部可见文字（标题/轴标/刻度标签/图内标注）。"""
+    out = [ax.title, ax.xaxis.label, ax.yaxis.label]
+    out += list(ax.get_xticklabels()) + list(ax.get_yticklabels()) + list(ax.texts)
+    return [t for t in out if t is not None and t.get_visible() and str(t.get_text()).strip()]
 
 
 def audit(fig, name):
@@ -125,7 +175,23 @@ def audit(fig, name):
                 issues.append(f"散点线宽越界 {lws.max():g}pt")
         if any(g.get_visible() for g in ax.get_xgridlines() + ax.get_ygridlines()):
             issues.append("存在背景网格（规范禁止）")
+        ab = ax.get_window_extent(r)                   # D7：图内标注须落在坐标轴框内
+        for t in ax.texts:
+            if not str(t.get_text()).strip() or not t.get_visible():
+                continue
+            tb = t.get_window_extent(r)
+            if tb.x0 < ab.x0 - 1 or tb.x1 > ab.x1 + 1 or tb.y0 < ab.y0 - 1 or tb.y1 > ab.y1 + 1:
+                issues.append(f"D7 图内文字超出坐标轴框：{str(t.get_text())[:14]}")
     legends = list(fig.legends) + [ax.get_legend() for ax in fig.axes if ax.get_legend()]
+    # D8：文字互不相压（刻度标签 / 图内标注 / 图例文字，容忍 ≤2pt² 擦边）
+    _boxes = [(t, t.get_window_extent(r)) for ax in fig.axes for t in _texts(ax)]
+    _boxes += [(t, t.get_window_extent(r)) for leg in legends for t in leg.get_texts()
+               if str(t.get_text()).strip()]
+    for _i in range(len(_boxes)):
+        for _j in range(_i + 1, len(_boxes)):
+            if _overlap(_boxes[_i][1], _boxes[_j][1]) and _ov_area(_boxes[_i][1], _boxes[_j][1]) > 2.0:
+                issues.append(f"D8 文字重叠：{str(_boxes[_i][0].get_text())[:10]}"
+                              f" ↔ {str(_boxes[_j][0].get_text())[:10]}")
     for leg in legends:
         if len(leg.get_texts()) > 6:                    # D3
             issues.append("D3 图例条目 > 6")
@@ -142,7 +208,7 @@ def audit(fig, name):
     if h * 25.4 > 170 + 1:
         issues.append("高度 > 170mm")
     print(f"  [审计{'✗' if issues else '✓'}] {name}"
-          + ("：" + "；".join(issues) if issues else "：D1–D6 + 规范区间通过"))
+          + ("：" + "；".join(issues) if issues else "：D1–D8 + 规范区间通过"))
     return issues
 
 
@@ -206,11 +272,12 @@ ax.set_ylabel("-log10 P (Welch t-test)")
 # 注：T02_DEG.value 是 {'总数','上调','下调'} 字典，直接串进标题会渲染出超长文本
 #     （原缺陷 D2 源头）；DEG 计数已由图例承担。
 # 出图要求 4.6：火山图须有关键基因标签；基因名斜体（3.2）。每侧取 -log10P 前 3 个。
+# 位置由 `_place_labels()` 像素级避让决定（D7 不出框 + D8 不重叠；全冲突则弃标）。
+_pts, _labs = [], []
 for _msk in (up, dn):
-    for _j, (_x, _r) in enumerate(d[_msk].nlargest(3, "-log10P").iterrows()):
-        ax.annotate(_r["symbol"], (_r["log2FC"], _r["-log10P"]),
-                    xytext=(0, 4 + 8 * (_j % 2)), textcoords="offset points",
-                    ha="center", fontsize=FS_SMALL, style="italic")
+    for _i, _r in d[_msk].nlargest(3, "-log10P").iterrows():
+        _pts.append((_r["log2FC"], _r["-log10P"])); _labs.append(str(_r["symbol"]))
+_place_labels(ax, _pts, _labs)
 legend_outside(ax, ncol=1)
 _audit_issues += save(fig, "01_deg_volcano")
 
@@ -281,19 +348,21 @@ ax.text(0.98, 0.04, f"Log-rank P = {p_km:.1e}\nHR = {cox['HR']:.3f}"
 ax.set_ylabel("Relapse-free survival")
 ax.set_xlim(left=0); ax.set_ylim(0, 1.02)
 legend_outside(ax, ncol=1)
-# 风险人数表：与横轴共享数据坐标，数字对齐在 4 个随访分位点
+# 风险人数表：与横轴共享数据坐标。组名**单独成行**（原与首个数字同行 → D8 重叠），
+# 端点数字左/右对齐（居中会越出框 → D7）。
 tmax = int(k["rfs_days"].max()); rt = [0, tmax // 3, 2 * tmax // 3, tmax]
 ax.set_xticks(rt)
-axt.set_ylim(0, 3); axt.set_yticks([])
+axt.set_ylim(0, 5.6); axt.set_yticks([])   # 末行须离底边 ≥ 半行高，否则压框（D7）
 for _sp in ("top", "right", "left"):
     axt.spines[_sp].set_visible(False)
 axt.set_xlabel("Days to relapse or censoring")
-axt.text(0, 2.55, "No. at risk", fontsize=FS_SMALL, ha="left")
-for _y, (_g, _nm) in [(1.55, (hi, "High risk")), (0.55, (lo, "Low risk"))]:
-    axt.text(0, _y, _nm, fontsize=FS_SMALL, ha="left")
+axt.text(0, 5.0, "No. at risk", fontsize=FS_SMALL, ha="left", va="center")
+for _base, (_g, _nm) in [(4.0, (hi, "High risk")), (2.0, (lo, "Low risk"))]:
+    axt.text(0, _base, _nm, fontsize=FS_SMALL, ha="left", va="center")
     for _t in rt:
-        axt.text(_t, _y, str(int((_g["rfs_days"] >= _t).sum())),
-                 fontsize=FS_SMALL, ha="center")
+        _ha = "left" if _t == rt[0] else ("right" if _t == rt[-1] else "center")
+        axt.text(_t, _base - 1.0, str(int((_g["rfs_days"] >= _t).sum())),
+                 fontsize=FS_SMALL, ha=_ha, va="center")
 _audit_issues += save(fig, "03_survival_km_risk")
 
 # ---------- 图4 ROC（performance） ----------
