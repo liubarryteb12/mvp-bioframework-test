@@ -578,15 +578,15 @@ def compile_manuscript_pdf(output_pdf_path, manuscript_data):
                       for j, c in enumerate(row)] for row in t_def['data']]
             t_flowable = Table(cells, colWidths=t_def.get('col_widths'))
             t_flowable.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f1f5f9')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#0f172a')),
                 ('FONTNAME', (0, 0), (-1, 0), FONTB),
                 ('FONTNAME', (0, 1), (-1, -1), FONT),
                 ('FONTSIZE', (0, 0), (-1, -1), 7),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
                 ('TOPPADDING', (0, 0), (-1, -1), 3),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')])]))
+                # 三线表（09/03 README §六 结构类规则：表格不画竖线）
+                ('LINEABOVE', (0, 0), (-1, 0), 1.0, colors.black),
+                ('LINEBELOW', (0, 0), (-1, 0), 0.5, colors.black),
+                ('LINEBELOW', (0, -1), (-1, -1), 1.0, colors.black)]))
             story.append(KeepTogether([Spacer(1, 2),
                                        P(f"<b>{t_def['caption']}</b>", st['SectionH2']),
                                        t_flowable, Spacer(1, 6)]))
@@ -597,7 +597,12 @@ def compile_manuscript_pdf(output_pdf_path, manuscript_data):
                                          st['FigureLegend'])]))
         if sec.get('page_break_after'):
             story.append(PageBreak())
-    story.append(P("声明 Declarations", st['SectionH1']))
+    abbrs = manuscript_data.get("abbreviations")
+    if abbrs:
+        story.append(P("缩写（Abbreviations）", st['SectionH1']))
+        for _a in abbrs:
+            story.append(P(_a, st['Body']))
+    story.append(P("声明（Declarations）", st['SectionH1']))
     for k, v in manuscript_data.get('declarations', []):
         story.append(P(f"<b>{k}</b>", st['SectionH2']))
         story.append(P(v, st['Body']))

@@ -53,15 +53,18 @@ dpi:
   raster_target: 600
   preview_target: 300
 
-# ---------- A-3 / §5.8 格式 ----------
+# ---------- A-3 / §5.8 格式（2026-09-15 对齐 09/03 照做版）----------
+# 软件画的图（matplotlib 等）→ 矢量 PDF 主文件（Type42 嵌字体，绕开 DPI）；
+# JPG 对线条图有损失真 → 禁用；TIFF+LZW 仅适用于设备拍摄的照片类位图
+# （图表类存 TIFF 即使 LZW 也压不动抗锯齿：实测单栏 10.3MB/双栏 43MB）。
 formats:
-  required: [pdf, tiff, png, jpg]
+  required: [pdf, png]
   vector_main: [pdf, eps]        # 矢量主图
-  raster_main: [tiff]            # 光栅主图
+  raster_main: [tiff]            # 光栅主图（仅照片/显微/电镜类）
   forbidden_as_main: [jpg, jpeg] # Nature 明文:JPEG 不得作主图生产文件
-  png_role: preview              # 仅预览
+  png_role: preview              # 仅预览/稿件内嵌
   max_bytes:
-    main: 52428800               # 50 MB
+    main: 10485760               # 10 MB（09/03 照做版：Wiley 硬规定）
     extended_data: 10485760      # 10 MB
 
 # ---------- A-2 色彩模式 ----------
@@ -69,14 +72,14 @@ color_mode:
   original_research: RGB
   review: CMYK
 
-# ---------- A-5 尺寸（2026-09-14 对齐 09/02 出图要求：安全规格取各刊范围小值）----------
+# ---------- A-5 尺寸（2026-09-15 对齐 09/03 照做版：单栏 8.5cm / 双栏 17.4cm 四家通吃）----------
 size:
-  single_col_max_mm: 85     # 各家 85–90，取 85 最安全
-  double_col_max_mm: 170    # 各家 170–190，取 170 最安全
+  single_col_max_mm: 85     # 8.5cm（Springer 8.5 / Elsevier ~9 / Wiley 8–18，取最小画幅）
+  double_col_max_mm: 174    # 17.4cm（照做版推荐画幅，双栏像素宽 4110px@600dpi）
   height_max_mm: 170
-  linewidth_pt: [0.25, 1.0]
-  fontsize_pt: [6, 8]       # 正文文字 6–8pt、刻度 ≥6pt（分图标签 8pt 见 panel_label_pt）
-  panel_label_pt: 8
+  linewidth_pt: [0.5, 1.5]  # 照做版：线宽 0.5–1.5pt（底线 0.25pt）
+  fontsize_pt: [7, 8]       # 照做版：正文 8pt（底线 7pt）、上下标 ≥6pt
+  panel_label_pt: 10        # 照做版：子图标签 10–12pt 加粗
 
 # ---------- A-6 禁止项 ----------
 forbidden_elements:

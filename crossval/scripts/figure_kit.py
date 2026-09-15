@@ -245,7 +245,7 @@ def check_file(path, spec=None, expect_kind="vector"):
     ext = path.lower().rsplit(".", 1)[-1]
     size = os.path.getsize(path)
     res.append(("C-6.f1", f"{fn} 体积合规", f"{size/1024:.0f}KB",
-                "≤50MB(主图)", size <= spec["formats"]["max_bytes"]["main"]))
+                "≤10MB(主图，Wiley)", size <= spec["formats"]["max_bytes"]["main"]))
     if ext in ("pdf", "eps"):
         pass                      # 矢量图不走 PIL(PIL 无法读 PDF)
     else:

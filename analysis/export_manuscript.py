@@ -20,9 +20,9 @@ MD = os.environ.get("MD_PATH") or next(
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "export")
 os.makedirs(OUT, exist_ok=True)
 FIGDIR = os.environ.get("FIG_DIR", os.path.join(BASE, "figures"))
-FIGS = {n: os.path.join(FIGDIR, f"0{n}_{k}.jpg")   # 300dpi jpg（四格式之一），docx/pdf 内嵌用
-        for n, k in {1: "deg_volcano", 2: "enrichment_dotplot",
-                     3: "survival_km_risk", 4: "performance_roc_cv"}.items()}
+FIGS = {n: os.path.join(FIGDIR, f"0{n}_{k}.png")   # 600dpi PNG（09/03 照做版：JPG 禁用于线条图；
+        for n, k in {1: "deg_volcano", 2: "enrichment_dotplot",      # 提交主文件=矢量 PDF，
+                     3: "survival_km_risk", 4: "performance_roc_cv"}.items()}  # 见 figures/submission/
 
 # ---------- 解析 md ----------
 sections, cur = {}, None
@@ -63,8 +63,13 @@ for seg in _abs_parts[1:]:
     elif _cur:
         abs_blocks.append((_cur, seg.strip()))
 KEYWORDS = "关键词：肺腺癌；转录组风险评分；无复发生存；特征选择泄露；GEO"
-TITLE_PAGE = [title, "作者信息（投稿前补全）", "单位，城市，国家", "通讯作者：姓名，邮箱"]
-DECL_SUBS = [(p.split("：", 1)[0], p) for p in paras["声明"] if "：" in p]
+TITLE_PAGE = [title, "作者信息（投稿前补全）", "单位，城市，国家", "通讯作者：姓名，邮箱",
+              "Figures: 4; Tables: 0; Supplementary materials: 0"]
+decl_lines = [ln.strip() for ln in "\n".join(sections["声明"]).splitlines() if ln.strip()]
+DECL_SUBS = [(ln.split("：", 1)[0], ln) for ln in decl_lines if "：" in ln]
+assert len(DECL_SUBS) >= 8, f"声明应含 ≥8 项（V5DECL/A5），实际 {len(DECL_SUBS)} 项"
+# 缩写（BMC 等要求 List of abbreviations）：逐行解析，每条 "ABBR：释义"
+ABBR = [ln.strip() for ln in "\n".join(sections.get("缩写", [])).splitlines() if ln.strip()]
 
 # ---------- 结构序自检（正文排版规范 v1.0 · S3 机器可检条） ----------
 order = [k for k in sections
@@ -105,11 +110,13 @@ abstract_lines = [P1] + [f"{k}：{v}" for k, v in abs_blocks] + [KEYWORDS]
 body_lines = with_captions()
 docA = "\n\n".join(TITLE_PAGE + ["摘要"] + abstract_lines + body_lines +
                    ["[图 1位置]", "[图 2位置]", "[图 3位置]", "[图 4位置]",
-                    "声明"] + [p for _, p in DECL_SUBS] + [refs_block])
+                    "缩写（Abbreviations）"] + ABBR +
+                   ["声明"] + [p for _, p in DECL_SUBS] + [refs_block])
 docB = "\n\n".join([captions[n] for n in sorted(captions)] + [refs_block])
 # 教训：docB 文本层不放裸"图 N"行——守卫正则的 \s 可跨行吞并，"图 N\n图 N：图注"会粘成
 # 双行图注导致 T9.3 逐字匹配失败；图注行本身含图号，图号集合不受影响。
 docP = "\n\n".join(TITLE_PAGE + ["摘要"] + abstract_lines + body_lines +
+                   ["缩写（Abbreviations）"] + ABBR +
                    ["声明"] + [p for _, p in DECL_SUBS] + [refs_block])
 # 去掉文本层中的裸节名行（docA/docP 中节名与段落合流的处理已隐含）
 for name, txt in (("docA", docA), ("docB", docB), ("docP", docP)):
@@ -118,27 +125,44 @@ for name, txt in (("docA", docA), ("docB", docB), ("docP", docP)):
 # ---------- 真 docx：编辑版（A，BMC 式版式） ----------
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt, Cm
+from docx.shared import Inches, Pt, Cm, RGBColor, Mm
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 
 def style_submission(doc):
-    """投稿"通用安全格式"（09/02 排版要求 §1，对三份 docx 生效）：
-    Times New Roman 12pt（中文宋体）+ **双倍行距** + A4 四周 2.5cm +
-    **全篇连续行号**（Nature/BMC/Wiley 均要求）+ 页脚页码（Word 域）+ 单栏左对齐。"""
+    """投稿"通用安全初稿组合"（09/03 SCI投稿模板包 README §三，对三份 docx 生效）：
+    Times New Roman 12pt（中文宋体）+ **1.5 倍行距**（安全版默认）+ A4 四周 2.54cm +
+    左对齐（不两端对齐）+ 页脚页码（Word 域）+ 标题 14/13/12pt 加粗黑色。
+    环境变量 DOCX_REVIEW=1 → 审稿版：双倍行距 + 全篇连续行号（期刊要求时用）。"""
+    review = os.environ.get("DOCX_REVIEW") == "1"
     st = doc.styles["Normal"]
     st.font.name = "Times New Roman"
     st.font.size = Pt(12)
     st.element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
-    st.paragraph_format.line_spacing = 2.0          # 双倍行距（全篇）
+    st.paragraph_format.line_spacing = 2.0 if review else 1.5
     st.paragraph_format.space_after = Pt(0)
+    st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    # 标题样式：一级 14pt / 二级 13pt / 三级 12pt，均加粗黑色（默认 Heading 是蓝色 Calibri，必须覆盖）
+    for _name, _size in (("Title", 16), ("Heading 1", 14), ("Heading 2", 13), ("Heading 3", 12)):
+        try:
+            _hs = doc.styles[_name]
+        except KeyError:
+            continue
+        _hs.font.name = "Times New Roman"
+        _hs.font.size = Pt(_size)
+        _hs.font.bold = True
+        _hs.font.color.rgb = RGBColor(0, 0, 0)
+        _hs.element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "宋体")
     sec = doc.sections[0]
-    sec.top_margin = sec.bottom_margin = sec.left_margin = sec.right_margin = Cm(2.5)
-    ln = OxmlElement("w:lnNumType")                  # 连续行号：Word 会按行渲染编号
-    ln.set(qn("w:countBy"), "1")
-    ln.set(qn("w:restart"), "continuous")
-    sec._sectPr.append(ln)
+    sec.page_width = Mm(210)                         # A4 纸型（教训：python-docx 默认模板是
+    sec.page_height = Mm(297)                        # Letter 612×792pt，只改边距不改纸型=违规）
+    sec.top_margin = sec.bottom_margin = sec.left_margin = sec.right_margin = Cm(2.54)
+    if review:
+        ln = OxmlElement("w:lnNumType")              # 连续行号：Word 会按行渲染编号
+        ln.set(qn("w:countBy"), "1")
+        ln.set(qn("w:restart"), "continuous")
+        sec._sectPr.append(ln)
     p = sec.footer.paragraphs[0]                     # 页脚页码（PAGE 域，Word 自动更新）
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     fld = OxmlElement("w:fldSimple")
@@ -148,17 +172,30 @@ def style_submission(doc):
     p._p.append(fld)
 
 
+def add_body(doc, text):
+    """中文正文段：首行缩进 2 字符（宋体 12pt × 2 = 24pt；09/03 README §三 共有参数）。"""
+    p = doc.add_paragraph(text)
+    p.paragraph_format.first_line_indent = Pt(24)
+    return p
+
+
 def add_abstract_doc(doc):
-    doc.add_heading("摘要", level=2)
-    doc.add_paragraph(P1)
+    doc.add_heading("摘要", level=1)
+    add_body(doc, P1)
     for k, v in abs_blocks:
         p = doc.add_paragraph(); r = p.add_run(k); r.bold = True
-        doc.add_paragraph(v)
-    doc.add_paragraph(KEYWORDS)
+        add_body(doc, v)
+    add_body(doc, KEYWORDS)
+
+
+def add_abbreviations_doc(doc):
+    doc.add_heading("缩写（Abbreviations）", level=1)
+    for a in ABBR:
+        doc.add_paragraph(a)
 
 
 def add_declarations_doc(doc):
-    doc.add_heading("声明（Declarations）", level=2)
+    doc.add_heading("声明（Declarations）", level=1)
     for k, p in DECL_SUBS:
         pp = doc.add_paragraph(); r = pp.add_run(k); r.bold = True
         doc.add_paragraph(p)
@@ -175,7 +212,7 @@ def add_ref_entries(doc):
 
 
 def add_refs_doc(doc):
-    doc.add_heading("参考文献", level=2)
+    doc.add_heading("参考文献", level=1)
     add_ref_entries(doc)
 
 
@@ -185,15 +222,17 @@ docA_real.add_heading(title, 0)
 for p in TITLE_PAGE[1:]:
     docA_real.add_paragraph(p)
 add_abstract_doc(docA_real)
-for sec in body_order:
-    docA_real.add_heading(sec, level=2)
+for i, sec in enumerate(body_order, 1):
+    docA_real.add_heading(f"{i} {sec}", level=1)     # 一级标题自动编号（1 引言 … 4 讨论）
     for p in paras[sec]:
-        docA_real.add_paragraph(p)
+        add_body(docA_real, p)
     for n, (s2, p2) in citing.items():
         if s2 == sec:
-            docA_real.add_paragraph(captions[n])
+            cp = docA_real.add_paragraph(captions[n])
+            cp.runs[0].font.size = Pt(10)            # 题注 10pt（09/03 README §三）
 for n in sorted(captions):
     docA_real.add_paragraph(f"[图 {n}位置]")
+add_abbreviations_doc(docA_real)
 add_declarations_doc(docA_real)
 add_refs_doc(docA_real)
 docA_real.save(os.path.join(OUT, "manuscript_编辑版.docx"))
@@ -201,21 +240,20 @@ docA_real.save(os.path.join(OUT, "manuscript_编辑版.docx"))
 # ---------- 图件嵌入尺寸（只缩不放大；上限 = 正文栏宽，不设更小的人为上限） ----------
 # 教训①：曾硬编码 6.3in 宽，3.6–3.9in 的原图被放大 1.6–1.7 倍，有效 dpi 跌破 300。
 # 教训②（本轮）：PDF 侧又叠了一个 5.0in 上限 → 双栏图（设计 183mm）被压到 127mm
-#   （0.69×），图内标注挤作一团、字迹重叠。现改为"上限 = 正文栏宽"：
-#   双栏图只做 183→172mm 的轻微等比缩放（0.94×），不再过度压缩。
+#   （0.69×），图内标注挤作一团、字迹重叠。现改为"上限 = 正文栏宽"。
+# 注：09/03 照做版双栏 174mm，在 171.9mm 版心内 0.988× 轻微等比缩放嵌入。
 from PIL import Image as PILImage
 
 PAGE_W_PT = 595.276                                # A4 宽（pt）
 MARGIN_PT = 54                                     # 与排版引擎一致（版心 171.9mm）
 COL_W_IN = (PAGE_W_PT - 2 * MARGIN_PT) / 72.0      # 版心宽 = 171.9 mm = 6.767 in
-# 注：170mm 双栏图在 171.9mm 版心内恰好 1.0× 零缩放嵌入（85/170 安全规格 × 54pt 版心）
 
 
 def fig_width_in(n, max_in=COL_W_IN):
-    """按 300dpi 自然尺寸取宽；仅在超出版心宽时才缩（只缩不放大）。"""
+    """按 600dpi 自然尺寸取宽；仅在超出版心宽时才缩（只缩不放大）。"""
     with open(FIGS[n], "rb") as f:
         im = PILImage.open(io.BytesIO(f.read()))
-    return min(im.size[0] / 300.0, max_in)
+    return min(im.size[0] / 600.0, max_in)
 
 
 # ---------- 真 docx：排版核对版（B，纯图片+图注） ----------
@@ -226,12 +264,16 @@ for n in sorted(captions):
     pic_p = docB_real.add_paragraph()
     pic_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pic_p.paragraph_format.keep_with_next = True   # 图与图注绑定，防跨页错位
+    # 行距必须单倍：图片段继承 1.5 倍时行高=图高×1.5，图下多出 50% 图高空白
+    pic_p.paragraph_format.line_spacing = 1.0
     pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n, COL_W_IN)))
     cap_p = docB_real.add_paragraph()
     cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = cap_p.add_run(f"图 {n}"); r.bold = True
-    cap_p.add_run("：" + captions[n].split("：", 1)[1])
-docB_real.add_heading("参考文献", level=2)
+    cap_p.paragraph_format.line_spacing = 1.0
+    r = cap_p.add_run(f"图 {n}"); r.bold = True; r.font.size = Pt(10)
+    _t = cap_p.add_run("：" + captions[n].split("：", 1)[1]); _t.font.size = Pt(10)
+add_abbreviations_doc(docB_real)
+docB_real.add_heading("参考文献", level=1)
 add_ref_entries(docB_real)
 docB_real.save(os.path.join(OUT, "manuscript_排版核对版.docx"))
 
@@ -242,20 +284,23 @@ docC.add_heading(title, 0)
 for p in TITLE_PAGE[1:]:
     docC.add_paragraph(p)
 add_abstract_doc(docC)
-for sec in body_order:
-    docC.add_heading(sec, level=2)
+for i, sec in enumerate(body_order, 1):
+    docC.add_heading(f"{i} {sec}", level=1)
     for p in paras[sec]:
-        docC.add_paragraph(p)
+        add_body(docC, p)
         for n, (s2, p2) in citing.items():
             if s2 == sec and p2 == p:
                 pic_p = docC.add_paragraph()
                 pic_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 pic_p.paragraph_format.keep_with_next = True
+                pic_p.paragraph_format.line_spacing = 1.0      # 单倍行距，防图下 50% 空白
                 pic_p.add_run().add_picture(FIGS[n], width=Inches(fig_width_in(n, COL_W_IN)))
                 cap_p = docC.add_paragraph()
                 cap_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                r = cap_p.add_run(f"图 {n}"); r.bold = True
-                cap_p.add_run("：" + captions[n].split("：", 1)[1])
+                cap_p.paragraph_format.line_spacing = 1.0
+                r = cap_p.add_run(f"图 {n}"); r.bold = True; r.font.size = Pt(10)
+                _t = cap_p.add_run("：" + captions[n].split("：", 1)[1]); _t.font.size = Pt(10)
+add_abbreviations_doc(docC)
 add_declarations_doc(docC)
 add_refs_doc(docC)
 docC.save(os.path.join(OUT, "manuscript_完整版.docx"))
@@ -287,6 +332,7 @@ TE.compile_manuscript_pdf(
                    **({"figures": [f for f in figs_payload]} if sec == "结果" else {})}
                   for i, sec in enumerate(body_order, 1)],
      "declarations": DECL_SUBS,
+     "abbreviations": ABBR,
      "references": REFS})
 
 print("导出完成 →", OUT)

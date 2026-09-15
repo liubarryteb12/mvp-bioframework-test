@@ -57,8 +57,29 @@
 图 3：风险评分生存分层
 图 4：复发预测 ROC 曲线
 
+## 缩写
+TRIPOD：个体预后或诊断多变量预测模型透明报告声明（Transparent Reporting of a Multivariable Prediction Model for Individual Prognosis Or Diagnosis）
+GEO：基因表达综合数据库（Gene Expression Omnibus）
+LUAD：肺腺癌（lung adenocarcinoma）
+RFS：无复发生存（recurrence-free survival）
+AUC：受试者工作特征曲线下面积（area under the receiver operating characteristic curve）
+ΔAUC：AUC 相对于临床基线模型的增量
+ROC：受试者工作特征（receiver operating characteristic）
+HR：风险比（hazard ratio）
+CI：置信区间（confidence interval）
+BH：Benjamini–Hochberg 法（用于错误发现率校正）
+FDR：错误发现率（false discovery rate）
+EPV：每变量事件数（events per variable）
+
 ## 声明
-数据可用性：GSE31210 来源于 GEO 公共数据库（登录号 GSE31210）。代码共享：分析脚本、台账与图件随分析档案交付。利益冲突：无。AI 使用声明：分析代码与初稿由 AI 辅助生成，经人工复核；所有数值由脚本从原始数据实跑产出并可复现。作者贡献：分析设计、代码、稿件由本项目组完成。
+伦理审批与参研知情：本研究仅使用 GEO 公共数据库（登录号 GSE31210）中已公开发表的去标识化数据，不涉及新增人类受试者，故无需伦理委员会审批；参研知情同意适用于原始数据提交者，本研究不再另行获取。
+出版知情同意：不适用。
+数据可用性：GSE31210 来源于 GEO 公共数据库（登录号 GSE31210）；分析所用的差异表达探针表、风险评分与生存台账随分析档案交付。
+代码共享：分析脚本、台账与图件随分析档案交付，可复现全部数值结果。
+利益冲突：作者声明无利益冲突。
+作者贡献：分析设计、代码实现、数据分析与稿件撰写由本项目组完成。
+资金：本研究未接受任何外部基金资助。
+AI 使用声明：分析代码与初稿由 AI 辅助生成，经人工复核；所有数值由脚本从原始数据实跑产出并可复现，作者对内容负全部责任。
 
 ## 参考文献
 [1] Wen S, Peng W, Chen Y, et al. Four differentially expressed genes can predict prognosis and microenvironment immune infiltration in lung cancer: a study based on data from the GEO. BMC Cancer. 2022;22:193. doi:10.1186/s12885-022-09296-8

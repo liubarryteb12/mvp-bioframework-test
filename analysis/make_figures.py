@@ -12,12 +12,17 @@
   D5 图与图跨页       → 一 Figure 一文件、单页矢量 PDF（保存后校验页数 = 1）
   D6 图间空白过多     → 统一栏宽网格（单栏 89mm / 双栏 183mm），同类图同尺寸
 
-规范来源 crossval/spec/figure_spec.yaml：
-  fontsize_pt ∈ [5,7]（面板标记 8）、linewidth_pt ∈ [0.25,1.0]、禁 background_grid；
-  栏宽 single 89mm / double 183mm、高 ≤170mm。色板 Wong 2011（色盲安全）。
-导出四格式 pdf/tiff/png/jpg @300dpi；png/tiff 强制 RGB（C-6）。
+规范来源（2026-09-15 起以 09/03/图片最稳妥配置_照做版.md 为最高依据）：
+  图表类一律**矢量 PDF 为主文件**（Type42 字体嵌入，彻底绕开 DPI 之争）；
+  PNG @600dpi 仅作稿件内嵌/预览副本；TIFF+LZW 参数卡适用于"设备拍的"照片类位图，
+  图表类不产出（实测 LZW 压不动抗锯齿：单栏 10.3MB/双栏 43MB，撞 Wiley 10MB 红线）；
+  **JPG 禁用于线条图**（照做版"绝对不要做"表：有损压缩 → 马赛克噪点）；
+  图中文字 Arial/Helvetica 统一：正文 8pt（底线 7pt）、上下标 ≥6pt、面板标记 10–12pt 加粗；
+  线宽 0.5–1.5pt（底线 0.25pt）、禁 background_grid；栏宽 single 85mm / double 174mm、高 ≤170mm；
+  色板 Wong 2011（色盲安全）；**单文件 <10MB**（Wiley 硬规定，保存后逐文件校验）；
+  投稿提交件 = figures/submission/Fig1..Fig4.pdf / FigS1-2.pdf（按正文出现顺序命名）。
 """
-import io, os, json, textwrap
+import io, os, json, textwrap, shutil
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -32,15 +37,15 @@ RES = os.path.join(BASE, "results")
 FIG = os.environ.get("FIG_DIR", os.path.join(BASE, "figures"))
 os.makedirs(FIG, exist_ok=True)
 
-# ── 栏宽网格（mm→in）────────────────────────────────────────────────────────
-# 安全规格（09/02/出图要求 §0）：单栏 85、双栏 170mm（各家范围 85–90 / 170–190，取小值最安全）
-COL1, COL2 = 85 / 25.4, 170 / 25.4           # 3.346 in / 6.693 in
+# ── 栏宽网格（mm→in；09/03 照做版：单栏 8.5cm / 双栏 17.4cm 这组四家通吃）────
+COL1, COL2 = 85 / 25.4, 174 / 25.4           # 3.346 in / 6.850 in
 H_SINGLE = 3.0                                # 单栏图统一高度（D6：同类图同尺寸）
-# ── 字号 / 线宽（出图要求：正文文字 6–8pt、刻度 ≥6pt、分图标签 8–10pt 粗体）──
-FS_MIN, FS_MAX = 6, 8
-FS, FS_SMALL, FS_PANEL = 7, 6, 8              # 面板标记 8pt（规范单列）
-LW_MIN, LW_MAX = 0.25, 1.0
-LW, LW_THIN, LW_REF = 0.9, 0.6, 0.5           # 曲线 / 轴 / 辅助线
+# ── 字号 / 线宽（09/03 照做版：正文 8pt 底线 7pt、上下标 ≥6pt、面板标记 10–12pt
+#    加粗、线宽 0.5–1.5pt 底线 0.25pt）──
+FS_MIN, FS_MAX = 7, 8
+FS, FS_SMALL, FS_PANEL = 8, 7, 10             # 面板标记 10pt 加粗（规范单列）
+LW_MIN, LW_MAX = 0.5, 1.5
+LW, LW_THIN, LW_REF = 0.9, 0.6, 0.5           # 曲线 / 轴 / 辅助线（均落 0.5–1.5pt）
 # ── 色板 Wong 2011（= Okabe-Ito，色盲安全；出图要求 3.3）─────────────────────
 BLUE, VERM, GREY = "#0072B2", "#D55E00", "#999999"
 RED = "#D62728"                               # 上调=红（用户 2026-09-15：上调红 / 下调蓝）
@@ -384,13 +389,15 @@ def audit(fig, name):
 def save(fig, name):
     from PIL import Image
     issues = audit(fig, name)
-    # 出图要求：线条图+文字的位图须 ≥600 dpi（spec dpi.line_min；TIFF 用 LZW 压缩）
-    for ext, kw in [("pdf", {}), ("tiff", dict(pil_kwargs={"compression": "tiff_lzw"})),
-                    ("png", {}), ("jpg", dict(pil_kwargs={"quality": 95}))]:
-        dpi = 600 if ext == "tiff" else 300
+    # 09/03 照做版核心分流：软件画的图 → **矢量 PDF 为提交主文件**（Type42 字体嵌入，
+    # 无 DPI 概念）；PNG @600dpi 仅作稿件内嵌/预览副本。TIFF 参数卡适用于"设备拍的"
+    # 照片类位图 —— 图表类存 TIFF 即使 LZW 也压不动抗锯齿（实测单栏 10.3MB、双栏
+    # 43MB，直接撞 Wiley 10MB 红线），故不产出；JPG 有损噪点，同样禁用。
+    for ext, kw in [("pdf", {}), ("png", {})]:
+        dpi = 600                                        # 位图副本统一 600dpi（照做版参数卡）
         p = os.path.join(FIG, f"{name}.{ext}")
         fig.savefig(p, dpi=dpi, **kw)                   # 不裁框：尺寸=栏宽网格（D6）
-        if ext in ("png", "tiff"):                      # C-6 色彩模式：RGB（matplotlib 默认 RGBA）
+        if ext == "png":                                # C-6 色彩模式：RGB（matplotlib 默认 RGBA）
             with open(p, "rb") as f:                    # 先读入内存，避免 PIL 句柄与写回冲突（曾致 Errno 22）
                 data = f.read()
             im = Image.open(io.BytesIO(data))
@@ -398,12 +405,15 @@ def save(fig, name):
                 bg = Image.new("RGB", im.size, (255, 255, 255))
                 bg.paste(im, mask=im.split()[-1] if im.mode in ("RGBA", "LA") else None)
                 buf = io.BytesIO()
-                bg.save(buf, format="TIFF" if ext == "tiff" else "PNG", dpi=(dpi, dpi))
+                bg.save(buf, format="PNG", dpi=(dpi, dpi))
                 tmp = p + ".tmp"
                 with open(tmp, "wb") as f:
                     f.write(buf.getvalue())
                 os.replace(tmp, p)
                 im.close()
+        _mb = os.path.getsize(p) / 1048576              # 09/03 照做版：单文件 <10MB（Wiley 硬规定）
+        if _mb > 10:
+            issues.append(f"单文件 {_mb:.1f}MB > 10MB（Wiley 硬规定，按降级顺序处理）")
     try:                                                # D5：一 Figure 一文件、单页
         from pypdf import PdfReader
         n = len(PdfReader(os.path.join(FIG, f"{name}.pdf")).pages)
@@ -411,12 +421,26 @@ def save(fig, name):
             issues.append(f"D5 PDF {n} 页（应单页）")
     except ImportError:
         pass
+    # 09/03 照做版 §文件命名：投稿件按正文出现顺序命名（Fig1…；补充材料 FigS1…）。
+    # 只复制矢量 PDF（图表走矢量；字体嵌入已由 pdf.fonttype=42 保证）。
+    _alias = SUBMIT_ALIAS.get(name)
+    if _alias:
+        _sub = os.path.join(FIG, "submission")
+        os.makedirs(_sub, exist_ok=True)
+        shutil.copy2(os.path.join(FIG, f"{name}.pdf"),
+                     os.path.join(_sub, f"{_alias}.pdf"))
     plt.close(fig)
-    print(f"  图件：{name} ×4 格式")
+    print(f"  图件：{name} ×2 格式（矢量 pdf + png@600dpi）"
+          + (f" → submission/{_alias}.pdf" if _alias else ""))
     return issues
 
 
 # ══════════════════════════ 图件 ════════════════════════════════════════════
+# 09/03 照做版 §文件命名：投稿件按正文出现顺序命名（Fig1…；补充材料 FigS1…）
+SUBMIT_ALIAS = {"01_deg_volcano": "Fig1", "02_enrichment_dotplot": "Fig2",
+                "03_survival_km_risk": "Fig3", "04_performance_roc_cv": "Fig4",
+                "05_performance_calibration_curve": "FigS1",
+                "06_dca_net_benefit": "FigS2"}
 R = json.load(open(os.path.join(RES, "results.json"), encoding="utf-8"))
 _audit_issues = []
 
@@ -465,16 +489,19 @@ try:
     labs = [wrap(t, 40) + f" (n={int(c)})" for t, c in zip(sel["Term"], sel["n_gene"])]
     ln = np.array([l.count("\n") + 1 for l in labs], float)
     ypos = np.concatenate([[0.0], np.cumsum(ln)])[:-1]   # 行 i 的起点 = 前 i 个标签占的总行数
-    # 图高随总行数自适应：行高取 2.0 倍 FS_SMALL（constrained_layout 会把标题/轴标/
-    # 轴外图例从图高中扣掉一大块固定余量，1.5 倍实测仍会叠压），另留 1.3in 版面余量
-    fig, ax = new_fig(COL2, max(3.3, float(ln.sum()) * FS_SMALL * 2.0 / 72 + 1.3))
+    # 图高随总行数自适应：行高取 1.7 倍 FS_SMALL（系数随字号 6→7pt 等比校准自 2.0，
+    # 保持绝对行距 ~12pt 不变，防高度超 170mm 上限；constrained_layout 会扣掉标题/
+    # 轴标的固定余量），另留 1.3in 版面余量
+    fig, ax = new_fig(COL2, max(3.3, float(ln.sum()) * FS_SMALL * 1.7 / 72 + 1.3))
     _nmin = float(sel["n_gene"].min())
     _sz = 10 + (sel["n_gene"].astype(float) - _nmin) * 2.2      # 气泡面积随基因数增大
     for grp, col in [("Up-regulated", RED), ("Down-regulated", BLUE)]:
         s = (sel["grp"] == grp).to_numpy()
         ax.scatter(sel.loc[s, "Adjusted P-value"], ypos[s], s=_sz[s].to_numpy(), c=col,
                    linewidths=0, label=f"{grp} genes (n = {int(s.sum())})")
-    ax.set_yticks(ypos)
+    # 刻度须对准**槽位中心**（ypos + (行数-1)/2）：matplotlib 多行标签按中心对齐刻度，
+    # 锚在槽首会向上凸出半格、与上一标签交叠（7pt 下实测触发 D8；6pt 时恰好擦边未报）
+    ax.set_yticks(ypos + (ln - 1) / 2.0)
     ax.set_yticklabels(labs, fontsize=FS_SMALL)
     ax.set_ylim(float(ypos[-1] + ln[-1]) - 0.35, -0.75)
     ax.set_xscale("log")
@@ -544,8 +571,10 @@ cox = R["T06_Cox_评分"]["value"]
 # 曲线 + 风险表用上下双轴（sharex）；图题移入图注（图内不得出现图题）。
 fig, (ax, axt) = plt.subplots(2, 1, figsize=(COL1, 3.7), sharex=True,
                               height_ratios=[3.0, 0.8], constrained_layout=True)
-for grp, c, lab in [(hi, VERM, f"High risk (n = {len(hi)}, events = {int(hi.event.sum())})"),
-                    (lo, BLUE, f"Low risk (n = {len(lo)}, events = {int(lo.event.sum())})")]:
+# 图例标签只留组名+n（8pt 下带 events 的长标签使右上角放不下、图例被挤到左侧压曲线
+# —— 实测遮挡 14.6%；各組事件数由图注与统计文本承担）
+for grp, c, lab in [(hi, VERM, f"High risk (n = {len(hi)})"),
+                    (lo, BLUE, f"Low risk (n = {len(lo)})")]:
     T, S, L, H = km(grp["rfs_days"], grp["event"])
     ax.step(T, S, where="post", c=c, lw=LW, label=lab)
     ax.fill_between(T, L, H, step="post", alpha=0.15, color=c, linewidth=0)
