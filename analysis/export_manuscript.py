@@ -20,9 +20,9 @@ MD = os.environ.get("MD_PATH") or next(
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "export")
 os.makedirs(OUT, exist_ok=True)
 FIGDIR = os.environ.get("FIG_DIR", os.path.join(BASE, "figures"))
-FIGS = {n: os.path.join(FIGDIR, f"0{n}_{k}.png")   # 600dpi PNG（09/03 照做版：JPG 禁用于线条图；
-        for n, k in {1: "deg_volcano", 2: "enrichment_dotplot",      # 提交主文件=矢量 PDF，
-                     3: "survival_km_risk", 4: "performance_roc_cv"}.items()}  # 见 figures/submission/
+FIGS = {n: os.path.join(FIGDIR, f"0{n}_{k}.png")   # 1200dpi PNG（09/03 出图工具：线条图位图规格，
+        for n, k in {1: "deg_volcano", 2: "enrichment_dotplot",      # 矢量母版直渲；提交主文件=矢量
+                     3: "survival_km_risk", 4: "performance_roc_cv"}.items()}  # 母版，见 figures/submission/
 
 # ---------- 解析 md ----------
 sections, cur = {}, None
@@ -250,10 +250,11 @@ COL_W_IN = (PAGE_W_PT - 2 * MARGIN_PT) / 72.0      # 版心宽 = 171.9 mm = 6.76
 
 
 def fig_width_in(n, max_in=COL_W_IN):
-    """按 600dpi 自然尺寸取宽；仅在超出版心宽时才缩（只缩不放大）。"""
+    """按 1200dpi 自然尺寸取宽（09/03 出图工具：线条图位图 1200dpi）；
+    仅在超出版心宽时才缩（只缩不放大）。"""
     with open(FIGS[n], "rb") as f:
         im = PILImage.open(io.BytesIO(f.read()))
-    return min(im.size[0] / 600.0, max_in)
+    return min(im.size[0] / 1200.0, max_in)
 
 
 # ---------- 真 docx：排版核对版（B，纯图片+图注） ----------

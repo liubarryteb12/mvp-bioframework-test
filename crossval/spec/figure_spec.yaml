@@ -58,11 +58,11 @@ dpi:
 # JPG 对线条图有损失真 → 禁用；TIFF+LZW 仅适用于设备拍摄的照片类位图
 # （图表类存 TIFF 即使 LZW 也压不动抗锯齿：实测单栏 10.3MB/双栏 43MB）。
 formats:
-  required: [pdf, png]
-  vector_main: [pdf, eps]        # 矢量主图
+  required: [pdf, svg, png]
+  vector_main: [pdf, eps, svg]   # 矢量主图/母版（SVG 字转路径，09/03 出图工具口径）
   raster_main: [tiff]            # 光栅主图（仅照片/显微/电镜类）
   forbidden_as_main: [jpg, jpeg] # Nature 明文:JPEG 不得作主图生产文件
-  png_role: preview              # 仅预览/稿件内嵌
+  png_role: preview              # 仅预览/稿件内嵌（线条图位图 1200dpi，矢量直渲）
   max_bytes:
     main: 10485760               # 10 MB（09/03 照做版：Wiley 硬规定）
     extended_data: 10485760      # 10 MB

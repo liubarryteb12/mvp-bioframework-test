@@ -12,15 +12,16 @@
   D5 图与图跨页       → 一 Figure 一文件、单页矢量 PDF（保存后校验页数 = 1）
   D6 图间空白过多     → 统一栏宽网格（单栏 89mm / 双栏 183mm），同类图同尺寸
 
-规范来源（2026-09-15 起以 09/03/图片最稳妥配置_照做版.md 为最高依据）：
-  图表类一律**矢量 PDF 为主文件**（Type42 字体嵌入，彻底绕开 DPI 之争）；
-  PNG @600dpi 仅作稿件内嵌/预览副本；TIFF+LZW 参数卡适用于"设备拍的"照片类位图，
-  图表类不产出（实测 LZW 压不动抗锯齿：单栏 10.3MB/双栏 43MB，撞 Wiley 10MB 红线）；
-  **JPG 禁用于线条图**（照做版"绝对不要做"表：有损压缩 → 马赛克噪点）；
+规范来源（2026-09-15 起以 09/03/图片最稳妥配置_照做版.md 与 README_出图工具.md 为最高依据）：
+  **矢量是母版，位图是派生**：图表类产出 PDF+SVG 双矢量母版（Type42 嵌字体 / SVG
+  字转路径，无 DPI 概念）+ PNG@1200dpi 派生副本（线条图位图规格，矢量直渲非插值）；
+  TIFF+LZW 参数卡适用于"设备拍的"照片类位图，图表类不产出（实测 LZW 压不动抗锯齿：
+  单栏 10.3MB/双栏 43MB，撞 Wiley 10MB 红线）；
+  **JPG 禁用于线条图**（照做版"绝对不要做"表 + 出图工具 check 亦标违规）；
   图中文字 Arial/Helvetica 统一：正文 8pt（底线 7pt）、上下标 ≥6pt、面板标记 10–12pt 加粗；
   线宽 0.5–1.5pt（底线 0.25pt）、禁 background_grid；栏宽 single 85mm / double 174mm、高 ≤170mm；
   色板 Wong 2011（色盲安全）；**单文件 <10MB**（Wiley 硬规定，保存后逐文件校验）；
-  投稿提交件 = figures/submission/Fig1..Fig4.pdf / FigS1-2.pdf（按正文出现顺序命名）。
+  投稿提交件 = figures/submission/Fig1..Fig4 / FigS1-2（pdf+svg 双格式，按正文出现顺序命名）。
 """
 import io, os, json, textwrap, shutil
 import numpy as np
@@ -65,6 +66,7 @@ plt.rcParams.update({
     "xtick.major.size": 2.5, "ytick.major.size": 2.5,
     "figure.constrained_layout.use": True,
     "pdf.fonttype": 42, "ps.fonttype": 42,     # C-4：出版 PDF 须 Type0/TrueType，禁 Type3
+    "svg.fonttype": "path",                    # 09/03 出图工具：SVG 字转路径，换机不缺字体
 })
 
 
@@ -389,12 +391,14 @@ def audit(fig, name):
 def save(fig, name):
     from PIL import Image
     issues = audit(fig, name)
-    # 09/03 照做版核心分流：软件画的图 → **矢量 PDF 为提交主文件**（Type42 字体嵌入，
-    # 无 DPI 概念）；PNG @600dpi 仅作稿件内嵌/预览副本。TIFF 参数卡适用于"设备拍的"
-    # 照片类位图 —— 图表类存 TIFF 即使 LZW 也压不动抗锯齿（实测单栏 10.3MB、双栏
-    # 43MB，直接撞 Wiley 10MB 红线），故不产出；JPG 有损噪点，同样禁用。
-    for ext, kw in [("pdf", {}), ("png", {})]:
-        dpi = 600                                        # 位图副本统一 600dpi（照做版参数卡）
+    # 09/03 出图工具核心思路：**矢量是母版，位图是派生**。图表类产出 PDF+SVG 双矢量
+    # 母版（Type42 嵌字体 / SVG 字转路径，均无 DPI 概念）+ PNG@1200dpi 派生副本
+    # （线条图位图规格；由矢量母版直接渲染，非插值放大）。TIFF+LZW 参数卡适用于
+    # "设备拍的"照片类位图 —— 图表类存 TIFF 即使 LZW 也压不动抗锯齿（实测单栏
+    # 10.3MB、双栏 43MB，撞 Wiley 10MB 红线）；JPG 有损噪点（工具 check 亦标线条图
+    # 违规），二者对图表类均不产出。
+    for ext, kw in [("pdf", {}), ("svg", {}), ("png", {})]:
+        dpi = 1200 if ext == "png" else 300              # 线条图位图 1200dpi（照做版参数卡）
         p = os.path.join(FIG, f"{name}.{ext}")
         fig.savefig(p, dpi=dpi, **kw)                   # 不裁框：尺寸=栏宽网格（D6）
         if ext == "png":                                # C-6 色彩模式：RGB（matplotlib 默认 RGBA）
@@ -422,16 +426,17 @@ def save(fig, name):
     except ImportError:
         pass
     # 09/03 照做版 §文件命名：投稿件按正文出现顺序命名（Fig1…；补充材料 FigS1…）。
-    # 只复制矢量 PDF（图表走矢量；字体嵌入已由 pdf.fonttype=42 保证）。
+    # 复制双矢量母版（PDF+SVG；字体嵌入/字转路径已由 rcParams 保证）。
     _alias = SUBMIT_ALIAS.get(name)
     if _alias:
         _sub = os.path.join(FIG, "submission")
         os.makedirs(_sub, exist_ok=True)
-        shutil.copy2(os.path.join(FIG, f"{name}.pdf"),
-                     os.path.join(_sub, f"{_alias}.pdf"))
+        for _ve in ("pdf", "svg"):
+            shutil.copy2(os.path.join(FIG, f"{name}.{_ve}"),
+                         os.path.join(_sub, f"{_alias}.{_ve}"))
     plt.close(fig)
-    print(f"  图件：{name} ×2 格式（矢量 pdf + png@600dpi）"
-          + (f" → submission/{_alias}.pdf" if _alias else ""))
+    print(f"  图件：{name} 母版 pdf+svg + png@1200dpi"
+          + (f" → submission/{_alias}.pdf/.svg" if _alias else ""))
     return issues
 
 
