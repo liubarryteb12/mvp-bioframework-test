@@ -178,30 +178,43 @@ def _block_ratio(data, lb):
 BLOCK_MAX = 0.03
 
 
-def _leg_kw(ncol):
-    """紧凑图例样式：小 handle、小行距、无边框（占位越小越不挡数据）。"""
-    return dict(frameon=False, ncol=ncol, handlelength=1.0, handletextpad=0.4,
-                labelspacing=0.3, borderpad=0.2, borderaxespad=0.3,
-                columnspacing=1.0, fontsize=FS_SMALL, title_fontsize=FS_SMALL)
+def _leg_kw(ncol, over=None):
+    """紧凑图例样式：小 handle、小行距、无边框（占位越小越不挡数据）。
+    over 用于逐图覆盖（如"气泡大小图例"的大圆点需要更宽的 handle 槽与更松的行距，
+    否则圆点会溢出行槽、压到自己的数值标签上 —— 用户 2026-09-15 反馈）。"""
+    kw = dict(frameon=False, ncol=ncol, handlelength=1.0, handletextpad=0.4,
+              labelspacing=0.3, borderpad=0.2, borderaxespad=0.3,
+              columnspacing=1.0, fontsize=FS_SMALL, title_fontsize=FS_SMALL)
+    kw.update(over or {})
+    return kw
 
 
-def _mk_legend(ax, handles, labels, loc, ncol, title, keep):
-    """建图例：keep=True 时用 add_artist（不顶掉同轴已有图例，供双图例图用）。"""
+def _mk_legend(ax, handles, labels, loc, ncol, title, keep, bbox=None, over=None):
+    """建图例：keep=True 时用 add_artist（不顶掉同轴已有图例，供双图例图用）。
+    bbox=（axes 分数坐标）时改走 bbox_to_anchor 精确锚定——两个图例要"上下紧排
+    且互不重叠"必须用锚点，matplotlib 的 9 个 loc 只能贴轴角，做不到。"""
+    kw = dict(loc=loc, title=title, **_leg_kw(ncol, over))
+    if bbox is not None:
+        kw.update(bbox_to_anchor=bbox, bbox_transform=ax.transAxes)
     if keep:
-        leg = mlegend.Legend(ax, handles, labels, loc=loc, title=title,
-                             **_leg_kw(ncol))
+        leg = mlegend.Legend(ax, handles, labels, **kw)
         ax.add_artist(leg)
     else:
-        leg = ax.legend(handles, labels, loc=loc, title=title, **_leg_kw(ncol))
+        leg = ax.legend(handles, labels, **kw)
     return leg
 
 
 def legend_in(ax, handles=None, labels=None, ncol=1, prefer=None, avoid=(),
-              title=None, keep=False):
+              title=None, keep=False, anchor=None, gap=3.0, leg_kw=None):
     """D1/D3：图例置于**轴内空白角**，位置由机器择定（不占版心外空间）。
 
     评分 =（与既有障碍相交数，数据遮挡比例）字典序最小；障碍包括轴内文字
     （基因标签 / P 值 / 风险表 / 轴内参考线文字）、先前已放的图例。
+
+    anchor=（像素 bbox）时，先试"**紧贴该图例下沿、右对齐**"（gap pt 间距），
+    即两个图例在同一个角里上下紧排成一块、互不重叠（用户 2026-09-15 规则：
+    图例既不能放错位置，也不能互相压）；若该落点压数据/撞障碍，则沿同一列
+    逐级下移，全不行才退回常规择优。
     返回图例 bbox 列表，供后续 `_place_labels()` 继续避让。
     """
     if handles is None:
@@ -214,12 +227,20 @@ def legend_in(ax, handles=None, labels=None, ncol=1, prefer=None, avoid=(),
     fig.canvas.draw()
     data = _data_px(ax)
     ab = ax.get_window_extent(r)
-    barriers = list(avoid) + [t.get_window_extent(r) for t in ax.texts
-                              if str(t.get_text()).strip() and t.get_visible()]
-    order = ([prefer] if prefer else []) + [l for l in _LEG_LOCS if l != prefer]
+    barriers = list(avoid) + ([anchor] if anchor is not None else []) \
+        + [t.get_window_extent(r) for t in ax.texts
+           if str(t.get_text()).strip() and t.get_visible()]
+    cands = []
+    if anchor is not None:                       # 首选：紧贴 anchor 下沿右对齐
+        _xa = min(1.0, (anchor.x1 - ab.x0) / (ab.x1 - ab.x0))
+        for _g in (gap, gap + 8.0, gap + 20.0):
+            _ya = (anchor.y0 - _g / 72.0 * fig.dpi - ab.y0) / (ab.y1 - ab.y0)
+            cands.append(("upper right", (_xa, _ya)))
+    cands += [(l, None) for l in ([prefer] if prefer else [])
+              + [l for l in _LEG_LOCS if l != prefer]]
     best = None
-    for loc in order:
-        leg = _mk_legend(ax, handles, labels, loc, ncol, title, keep)
+    for loc, bb in cands:
+        leg = _mk_legend(ax, handles, labels, loc, ncol, title, keep, bb, leg_kw)
         fig.canvas.draw()
         lb = leg.get_window_extent(r)
         clash = sum(1 for b in barriers if _ov_area(lb, b) > 2.0)
@@ -228,10 +249,10 @@ def legend_in(ax, handles=None, labels=None, ncol=1, prefer=None, avoid=(),
         score = (clash + (1 if out else 0), round(_block_ratio(data, lb), 4))
         leg.remove()
         if best is None or score < best[0]:
-            best = (score, loc)
+            best = (score, loc, bb)
         if score == (0, 0.0):
             break
-    leg = _mk_legend(ax, handles, labels, best[1], ncol, title, keep)
+    leg = _mk_legend(ax, handles, labels, best[1], ncol, title, keep, best[2], leg_kw)
     fig.canvas.draw()
     lb = leg.get_window_extent(r)
     print(f"    [图例] loc={best[1]:<12s} 障碍={best[0][0]} 遮挡={best[0][1]:.2%}"
@@ -458,7 +479,9 @@ try:
     ax.set_ylim(float(ypos[-1] + ln[-1]) - 0.35, -0.75)
     ax.set_xscale("log")
     ax.set_xlabel("Adjusted P-value (Benjamini–Hochberg)")
-    # 双图例：右上=方向（颜色），左下=基因数（气泡大小），均置于轴内空白处。
+    # 双图例**同角堆叠在右上空白区**：方向（颜色）在上、基因数（气泡大小）紧贴其
+    # 下沿右对齐，两块互不重叠（用户 2026-09-15 反馈：基因数图例位置错、还叠压方向
+    # 图例与数据点 —— 左下角压住 Regulation Of Angiogenesis 那颗大蓝点）。
     # 方向图例改用**等大小**圆形 handle（红=上调 / 蓝=下调）：原散点 handle 会随基因数
     # 变大小，既在紧凑行距下令两枚圆点互相叠压，又与"大小=基因数"的语义混淆
     # （用户 2026-09-15 反馈：图例重叠、圆圈大小不等、位置不对）。
@@ -476,8 +499,14 @@ try:
                    int(sel["n_gene"].max())})
     _sh = [Line2D([], [], marker="o", ls="", mfc="none", mec="0.35",
                   ms=float(np.sqrt(10 + (v - _nmin) * 2.2)), label=str(v)) for v in _ref]
+    # 大小图例的 handle 槽宽 / 行距须随**最大气泡直径**放宽：默认 handlelength=1.0、
+    # labelspacing=0.3（6pt 字号下的 6pt / 1.8pt）装不下 ~11.6pt 的大圆点 —— 圆点会
+    # 溢出槽位压住自己的数值标签、上下行圆点也会互相叠压（用户 2026-09-15 反馈）。
+    _dmax = float(np.sqrt(10 + (max(_ref) - _nmin) * 2.2))         # 最大气泡直径 pt
     legend_in(ax, _sh, [str(v) for v in _ref], ncol=1, title="Gene count",
-              prefer="lower left", avoid=_a1, keep=True)        # 大小图例（避开方向图例）
+              prefer="upper right", avoid=_a1, keep=True, anchor=_a1[0],
+              leg_kw=dict(handlelength=_dmax / FS_SMALL + 0.4,
+                          labelspacing=_dmax / FS_SMALL - 0.8))
     _audit_issues += save(fig, "02_enrichment_dotplot")
 except Exception as ex:
     print("图2 跳过:", ex)
