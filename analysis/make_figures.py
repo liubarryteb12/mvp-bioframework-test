@@ -43,6 +43,7 @@ LW_MIN, LW_MAX = 0.25, 1.0
 LW, LW_THIN, LW_REF = 0.9, 0.6, 0.5           # 曲线 / 轴 / 辅助线
 # ── 色板 Wong 2011（= Okabe-Ito，色盲安全；出图要求 3.3）─────────────────────
 BLUE, VERM, GREY = "#0072B2", "#D55E00", "#999999"
+RED = "#D62728"                               # 上调=红（用户 2026-09-15：上调红 / 下调蓝）
 
 plt.rcParams.update({
     # 出图要求 0/3.2：全篇图统一 Arial/Helvetica（Windows=Arial，云端=Liberation Sans
@@ -109,8 +110,10 @@ def wrap(s, n):
     return "\n".join(textwrap.wrap(s, n)) if len(s) > n else s
 
 
-# ── 图例择位：只允许**轴内**候选（轴外右侧会给 constrained_layout 预留空间，
-#    把绘图区压窄、图幅右侧空出一大片 —— 用户 2026-09-15 明确否决）──
+# ── 图例择位：**优先右上角空白处**（用户 2026-09-15 规则）；只允许**轴内**候选
+#    （轴外右侧会给 constrained_layout 预留空间，把绘图区压窄、图幅右侧空出一大片
+#     —— 用户 2026-09-15 明确否决）。候选按此序评估，取"障碍+遮挡"最小者；
+#    右上角若被数据/文字占用则自动顺延到次空的角，保证落在真空白处。──
 _LEG_LOCS = ("upper right", "upper left", "lower left", "lower right",
              "center right", "center left", "upper center", "lower center")
 
@@ -406,7 +409,7 @@ up = d["DEG"].astype(bool) & (d["log2FC"] > 0)
 dn = d["DEG"].astype(bool) & (d["log2FC"] < 0)
 ax.scatter(d.loc[dn, "log2FC"], d.loc[dn, "-log10P"], s=3, c=BLUE, linewidths=0,
            label=f"Down-regulated (n = {int(dn.sum())})")
-ax.scatter(d.loc[up, "log2FC"], d.loc[up, "-log10P"], s=3, c=VERM, linewidths=0,
+ax.scatter(d.loc[up, "log2FC"], d.loc[up, "-log10P"], s=3, c=RED, linewidths=0,
            label=f"Up-regulated (n = {int(up.sum())})")
 ax.axhline(-np.log10(0.05), ls="--", lw=LW_REF, c="k")
 ax.axvline(0.585, ls="--", lw=LW_REF, c="k")
@@ -446,7 +449,7 @@ try:
     fig, ax = new_fig(COL2, max(3.3, float(ln.sum()) * FS_SMALL * 2.0 / 72 + 1.3))
     _nmin = float(sel["n_gene"].min())
     _sz = 10 + (sel["n_gene"].astype(float) - _nmin) * 2.2      # 气泡面积随基因数增大
-    for grp, col in [("Up-regulated", VERM), ("Down-regulated", BLUE)]:
+    for grp, col in [("Up-regulated", RED), ("Down-regulated", BLUE)]:
         s = (sel["grp"] == grp).to_numpy()
         ax.scatter(sel.loc[s, "Adjusted P-value"], ypos[s], s=_sz[s].to_numpy(), c=col,
                    linewidths=0, label=f"{grp} genes (n = {int(s.sum())})")
@@ -455,16 +458,26 @@ try:
     ax.set_ylim(float(ypos[-1] + ln[-1]) - 0.35, -0.75)
     ax.set_xscale("log")
     ax.set_xlabel("Adjusted P-value (Benjamini–Hochberg)")
-    # 双图例：右上=方向（颜色），右下=基因数（气泡大小）——均在坐标轴外，不压数据
+    # 双图例：右上=方向（颜色），左下=基因数（气泡大小），均置于轴内空白处。
+    # 方向图例改用**等大小**圆形 handle（红=上调 / 蓝=下调）：原散点 handle 会随基因数
+    # 变大小，既在紧凑行距下令两枚圆点互相叠压，又与"大小=基因数"的语义混淆
+    # （用户 2026-09-15 反馈：图例重叠、圆圈大小不等、位置不对）。
     from matplotlib.lines import Line2D
-    _h, _l = ax.get_legend_handles_labels()
-    _a1 = legend_in(ax, _h, _l, ncol=1, prefer="upper right")   # 方向图例（轴内）
+    _n_up = int((sel["grp"] == "Up-regulated").sum())
+    _n_dn = int((sel["grp"] == "Down-regulated").sum())
+    _MS = 5.0
+    _h_dir = [Line2D([], [], marker="o", ls="", mfc=RED, mec=RED, ms=_MS,
+                     label=f"Up-regulated genes (n = {_n_up})"),
+              Line2D([], [], marker="o", ls="", mfc=BLUE, mec=BLUE, ms=_MS,
+                     label=f"Down-regulated genes (n = {_n_dn})")]
+    _a1 = legend_in(ax, _h_dir, [h.get_label() for h in _h_dir], ncol=1,
+                    prefer="upper right")                       # 方向图例 → 右上空白角
     _ref = sorted({int(sel["n_gene"].min()), int(sel["n_gene"].median()),
                    int(sel["n_gene"].max())})
     _sh = [Line2D([], [], marker="o", ls="", mfc="none", mec="0.35",
                   ms=float(np.sqrt(10 + (v - _nmin) * 2.2)), label=str(v)) for v in _ref]
     legend_in(ax, _sh, [str(v) for v in _ref], ncol=1, title="Gene count",
-              prefer="lower left", avoid=_a1, keep=True)        # 大小图例（避开前者）
+              prefer="lower left", avoid=_a1, keep=True)        # 大小图例（避开方向图例）
     _audit_issues += save(fig, "02_enrichment_dotplot")
 except Exception as ex:
     print("图2 跳过:", ex)
@@ -517,7 +530,7 @@ ax.text(0.98, 0.04, f"Log-rank P = {p_km:.1e}\nHR = {cox['HR']:.3f}"
         transform=ax.transAxes, ha="right", va="bottom", fontsize=FS_SMALL)
 ax.set_ylabel("Relapse-free survival")
 ax.set_xlim(left=0); ax.set_ylim(0, 1.02)
-legend_in(ax, ncol=1, prefer="lower left")
+legend_in(ax, ncol=1)                     # 默认偏好右上空白角
 # 风险人数表：与横轴共享数据坐标。组名**单独成行**（原与首个数字同行 → D8 重叠），
 # 端点数字左/右对齐（居中会越出框 → D7）。
 tmax = int(k["rfs_days"].max()); rt = [0, tmax // 3, 2 * tmax // 3, tmax]
@@ -546,7 +559,7 @@ ax.plot(fpr1, tpr1, c=VERM, lw=LW, label=f"Risk score (AUC = {a1:.3f})")
 ax.plot([0, 1], [0, 1], c=GREY, lw=LW_REF, ls=":")
 ax.set_xlabel("1 - specificity"); ax.set_ylabel("Sensitivity")
 ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.02, 1.02)
-legend_in(ax, ncol=1, prefer="lower right")
+legend_in(ax, ncol=1)                     # 默认偏好右上空白角
 _audit_issues += save(fig, "04_performance_roc_cv")
 
 # ---------- 图5 校准曲线（performance，补充材料） ----------
@@ -560,7 +573,7 @@ if os.path.exists(cal_p):
     ax.set_xlabel("Predicted probability (out-of-fold)")
     ax.set_ylabel("Observed relapse rate")
     ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-    legend_in(ax, ncol=1, prefer="upper left")
+    legend_in(ax, ncol=1)                 # 默认偏好右上空白角
     _audit_issues += save(fig, "05_performance_calibration_curve")
 else:
     print("图5 跳过：缺 T13b_校准分位.csv")
@@ -574,7 +587,7 @@ if os.path.exists(dca_p):
     ax.plot(dc["threshold"], dc["NB_all"], c=BLUE, lw=LW, ls="--", label="Treat all")
     ax.plot(dc["threshold"], dc["NB_model"], c=VERM, lw=LW, label="Risk score")
     ax.set_xlabel("Threshold probability"); ax.set_ylabel("Net benefit")
-    legend_in(ax, ncol=1, prefer="lower right")
+    legend_in(ax, ncol=1)                 # 默认偏好右上空白角
     _audit_issues += save(fig, "06_dca_net_benefit")
 else:
     print("图6 跳过：缺 T13c_DCA曲线.csv")
