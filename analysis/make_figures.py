@@ -4,9 +4,10 @@
 
 对治《08.生信分析模块库/出图自查清单.md》六类缺陷（源自 09.SCI文章排版参考/01/不足.txt）：
 
-  D1 文字/标签盖过数据 → 图例一律置于坐标轴外（下方），绝不落进数据区
+  D1 文字/标签盖过数据 → 图例**置于轴内数据最空的角**（自动择位），且机器验证
+                        框内数据点占比 ≤3%、不与轴内文字/别的图例相压、不出轴框
   D2 文字超出图框     → 固定栏宽 figsize + constrained_layout，文本锁在版心内
-  D3 图例过长盖过数据 → 图例条目 ≤6、横排于轴外；长条目/长标签换行
+  D3 图例过长盖过数据 → 图例条目 ≤6、紧凑排布（小 handle/小行距），禁轴外右侧占位
   D4 图例体系缺失     → 有序列必有图例；多面板图加粗体面板标记；缩写就地定义
   D5 图与图跨页       → 一 Figure 一文件、单页矢量 PDF（保存后校验页数 = 1）
   D6 图间空白过多     → 统一栏宽网格（单栏 89mm / 双栏 183mm），同类图同尺寸
@@ -23,6 +24,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
+from matplotlib import legend as mlegend
 
 SEED = 20260910
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -71,14 +73,14 @@ def new_fig(w=COL1, h=H_SINGLE):
     return fig, ax
 
 
-def _place_labels(ax, pts, labels, fontsize=FS_SMALL, italic=True):
+def _place_labels(ax, pts, labels, fontsize=FS_SMALL, italic=True, avoid=()):
     """D7/D8：图内点标签的**像素级贪心避让**。
 
-    逐个标签尝试 8 个候选偏移，取第一个"完全落在坐标轴框内 且 不与已放标签相交"的位置；
-    全部候选冲突则**放弃该标签**（宁缺毋压），返回实际放置条数。
+    逐个标签尝试 8 个候选偏移，取第一个"完全落在坐标轴框内 且 不与已放标签/图例/
+    轴内既有文字相交"的位置；全部候选冲突则**放弃该标签**（宁缺毋压），返回放置条数。
     """
     fig = ax.get_figure()
-    placed, n = [], 0
+    placed, n = list(avoid), 0
     for (x, y), s in zip(pts, labels):
         got = None
         for dx, dy, va in [(0, 6, "bottom"), (0, -6, "top"), (8, 2, "bottom"),
@@ -107,17 +109,131 @@ def wrap(s, n):
     return "\n".join(textwrap.wrap(s, n)) if len(s) > n else s
 
 
-def legend_outside(ax, ncol=1):
-    """D1/D3：图例置于**图右侧**（figure legend，loc="outside right center"），
-    由 constrained_layout 预留空间 → 永不覆盖数据、也不出画布；条目上限 6。
-    （2026-09-14 用户反馈"图例没在右边"：SCI 常规为右侧竖排单列图例。）"""
-    hs, ls = ax.get_legend_handles_labels()
-    if not hs:
-        return
-    assert len(hs) <= 6, f"D3 违规：图例 {len(hs)} 条 > 6"
-    ax.get_figure().legend(hs, ls, frameon=False, loc="outside right center",
-                           ncol=ncol, handlelength=1.3,
-                           handletextpad=0.5, columnspacing=1.2, labelspacing=0.5)
+# ── 图例择位：只允许**轴内**候选（轴外右侧会给 constrained_layout 预留空间，
+#    把绘图区压窄、图幅右侧空出一大片 —— 用户 2026-09-15 明确否决）──
+_LEG_LOCS = ("upper right", "upper left", "lower left", "lower right",
+             "center right", "center left", "upper center", "lower center")
+
+
+def _densify(px, step=8.0):
+    """把折线在**像素空间**按 ~step 像素间隔加密：长度代理，使"图例压住一段长
+    直线段"也能被统计（仅靠顶点会漏检 axhline / 长台阶）。"""
+    if len(px) < 2:
+        return px
+    seg = np.linalg.norm(np.diff(px, axis=0), axis=1)
+    total = float(seg.sum())
+    if total <= step:
+        return px
+    cum = np.concatenate([[0.0], np.cumsum(seg)]) / total
+    t = np.linspace(0.0, 1.0, max(int(total / step) + 1, 2))
+    return np.column_stack([np.interp(t, cum, px[:, 0]), np.interp(t, cum, px[:, 1])])
+
+
+def _data_px(ax):
+    """轴内数据元素的像素坐标，**分两类**返回：
+       sc = 散点（每行 = 一个观测点）、ln = 曲线（按 8px 加密，行数与弧长成正比）。
+    两类分开统计遮挡比例，语义分别是"挡掉多少点"与"挡掉多少曲线长度"。"""
+    sc, ln = [], []
+    for c in ax.collections:
+        try:
+            off = np.asarray(c.get_offsets(), float)
+        except Exception:
+            continue
+        # 只认真正的散点（fill_between 的 PolyCollection offsets 恒为 [[0,0]]）
+        if off.ndim == 2 and len(off) >= 2 and c.get_visible():
+            sc.append(ax.transData.transform(off[:, :2]))
+    for l in ax.lines:
+        if not l.get_visible() or l.get_transform() is not ax.transData:
+            continue                                   # 排除 axhline 等混合坐标参考线
+        xy = np.asarray(l.get_xydata(), float)
+        if xy.ndim == 2 and len(xy) >= 2:
+            ln.append(_densify(ax.transData.transform(xy[:, :2])))
+    return (np.vstack(sc) if sc else np.empty((0, 2)),
+            np.vstack(ln) if ln else np.empty((0, 2)))
+
+
+def _blk(px, b):
+    """落在 bbox 内的数据元素数（px 为像素坐标 Nx2）。"""
+    if len(px) == 0:
+        return 0
+    m = ((px[:, 0] >= b.x0) & (px[:, 0] <= b.x1)
+         & (px[:, 1] >= b.y0) & (px[:, 1] <= b.y1))
+    return int(m.sum())
+
+
+def _block_ratio(data, lb):
+    """图例框对数据的遮挡比例（0–1）：散点取点数比，曲线取弧长比，取大者。"""
+    sc, ln = data
+    ratios = []
+    for px, w in ((sc, 1.0), (ln, 1.0)):        # 两类各自独立；曲线已按弧长加密
+        if len(px):
+            ratios.append(_blk(px, lb) * w / len(px))
+    return max(ratios) if ratios else 0.0
+
+
+# 图例可容忍的数据遮挡上限（散点/曲线各自）：超过即判 D1 违规
+BLOCK_MAX = 0.03
+
+
+def _leg_kw(ncol):
+    """紧凑图例样式：小 handle、小行距、无边框（占位越小越不挡数据）。"""
+    return dict(frameon=False, ncol=ncol, handlelength=1.0, handletextpad=0.4,
+                labelspacing=0.3, borderpad=0.2, borderaxespad=0.3,
+                columnspacing=1.0, fontsize=FS_SMALL, title_fontsize=FS_SMALL)
+
+
+def _mk_legend(ax, handles, labels, loc, ncol, title, keep):
+    """建图例：keep=True 时用 add_artist（不顶掉同轴已有图例，供双图例图用）。"""
+    if keep:
+        leg = mlegend.Legend(ax, handles, labels, loc=loc, title=title,
+                             **_leg_kw(ncol))
+        ax.add_artist(leg)
+    else:
+        leg = ax.legend(handles, labels, loc=loc, title=title, **_leg_kw(ncol))
+    return leg
+
+
+def legend_in(ax, handles=None, labels=None, ncol=1, prefer=None, avoid=(),
+              title=None, keep=False):
+    """D1/D3：图例置于**轴内空白角**，位置由机器择定（不占版心外空间）。
+
+    评分 =（与既有障碍相交数，数据遮挡比例）字典序最小；障碍包括轴内文字
+    （基因标签 / P 值 / 风险表 / 轴内参考线文字）、先前已放的图例。
+    返回图例 bbox 列表，供后续 `_place_labels()` 继续避让。
+    """
+    if handles is None:
+        handles, labels = ax.get_legend_handles_labels()
+    if not handles:
+        return []
+    assert len(handles) <= 6, f"D3 违规：图例 {len(handles)} 条 > 6"
+    fig = ax.get_figure()
+    r = fig.canvas.get_renderer()
+    fig.canvas.draw()
+    data = _data_px(ax)
+    ab = ax.get_window_extent(r)
+    barriers = list(avoid) + [t.get_window_extent(r) for t in ax.texts
+                              if str(t.get_text()).strip() and t.get_visible()]
+    order = ([prefer] if prefer else []) + [l for l in _LEG_LOCS if l != prefer]
+    best = None
+    for loc in order:
+        leg = _mk_legend(ax, handles, labels, loc, ncol, title, keep)
+        fig.canvas.draw()
+        lb = leg.get_window_extent(r)
+        clash = sum(1 for b in barriers if _ov_area(lb, b) > 2.0)
+        out = (lb.x0 < ab.x0 - 1 or lb.x1 > ab.x1 + 1
+               or lb.y0 < ab.y0 - 1 or lb.y1 > ab.y1 + 1)
+        score = (clash + (1 if out else 0), round(_block_ratio(data, lb), 4))
+        leg.remove()
+        if best is None or score < best[0]:
+            best = (score, loc)
+        if score == (0, 0.0):
+            break
+    leg = _mk_legend(ax, handles, labels, best[1], ncol, title, keep)
+    fig.canvas.draw()
+    lb = leg.get_window_extent(r)
+    print(f"    [图例] loc={best[1]:<12s} 障碍={best[0][0]} 遮挡={best[0][1]:.2%}"
+          f" 占轴宽 {(lb.x1 - lb.x0) / (ab.x1 - ab.x0):.0%}")
+    return [lb]
 
 
 def panel(ax, letter):
@@ -182,24 +298,53 @@ def audit(fig, name):
             tb = t.get_window_extent(r)
             if tb.x0 < ab.x0 - 1 or tb.x1 > ab.x1 + 1 or tb.y0 < ab.y0 - 1 or tb.y1 > ab.y1 + 1:
                 issues.append(f"D7 图内文字超出坐标轴框：{str(t.get_text())[:14]}")
-    legends = list(fig.legends) + [ax.get_legend() for ax in fig.axes if ax.get_legend()]
+    legends = [(ax, leg) for ax in fig.axes for leg in ax.get_children()
+               if isinstance(leg, mlegend.Legend)]
+    legends += [(None, leg) for leg in fig.legends]
     # D8：文字互不相压（刻度标签 / 图内标注 / 图例文字，容忍 ≤2pt² 擦边）
     _boxes = [(t, t.get_window_extent(r)) for ax in fig.axes for t in _texts(ax)]
-    _boxes += [(t, t.get_window_extent(r)) for leg in legends for t in leg.get_texts()
+    _boxes += [(t, t.get_window_extent(r)) for _, leg in legends for t in leg.get_texts()
                if str(t.get_text()).strip()]
     for _i in range(len(_boxes)):
         for _j in range(_i + 1, len(_boxes)):
             if _overlap(_boxes[_i][1], _boxes[_j][1]) and _ov_area(_boxes[_i][1], _boxes[_j][1]) > 2.0:
                 issues.append(f"D8 文字重叠：{str(_boxes[_i][0].get_text())[:10]}"
                               f" ↔ {str(_boxes[_j][0].get_text())[:10]}")
-    for leg in legends:
+    # D1：图例**必须在轴内**且不挡数据/不压图内文字。
+    #     （旧判据"图例不得与坐标轴重叠"= 强制轴外 → 绘图区被压窄、图幅右侧一片空白，
+    #      用户 2026-09-15 明确否决；改为度量"遮挡了多少数据"才是真要求。）
+    for ax, leg in legends:
         if len(leg.get_texts()) > 6:                    # D3
             issues.append("D3 图例条目 > 6")
-        lb = leg.get_window_extent(r)                   # D1/D3：图例不得压住任一坐标轴区域
-        for ax in fig.axes:
-            if _overlap(lb, ax.get_window_extent(r)):
-                issues.append("D1 图例与坐标轴区域重叠")
-                break
+        lb = leg.get_window_extent(r)
+        if ax is None:
+            W, H = fig.get_size_inches()[0] * fig.dpi, fig.get_size_inches()[1] * fig.dpi
+            if lb.x0 < -1 or lb.y0 < -1 or lb.x1 > W + 1 or lb.y1 > H + 1:
+                issues.append("D1 画布级图例超出画布")
+            continue
+        ab = ax.get_window_extent(r)
+        if (lb.x0 < ab.x0 - 1 or lb.x1 > ab.x1 + 1
+                or lb.y0 < ab.y0 - 1 or lb.y1 > ab.y1 + 1):
+            issues.append(f"D1 图例超出坐标轴框：{leg.get_texts()[0].get_text()[:14]}")
+        _sc, _ln = _data_px(ax)
+        _blk_r = _block_ratio((_sc, _ln), lb)
+        if _blk_r > BLOCK_MAX:                          # D1：遮挡数据 ≤3%
+            issues.append(f"D1 图例遮挡数据 {_blk_r:.1%}"
+                          f"（点 {_blk(_sc, lb)}/{len(_sc)}、"
+                          f"线 {_blk(_ln, lb)}/{len(_ln)}）")
+        for t in ax.texts:                              # D1：不得压住图内文字
+            if not str(t.get_text()).strip() or not t.get_visible():
+                continue
+            if _ov_area(lb, t.get_window_extent(r)) > 2.0:
+                issues.append(f"D1 图例压住图内文字：{str(t.get_text())[:14]}")
+    # D9：版心利用率——坐标轴宽度须占画布宽度 ≥55%（防"图例占位把绘图区压窄、
+    #     图幅空一大片"这类结构性浪费复发）
+    fw = fig.get_size_inches()[0] * fig.dpi
+    for ax in fig.axes:
+        ab = ax.get_window_extent(r)
+        frac = (ab.x1 - ab.x0) / fw
+        if frac < 0.55:
+            issues.append(f"D9 绘图区横向利用率仅 {frac:.0%}（<55%，图幅被浪费）")
     for ax in fig.axes:                                 # D4：有序列必有图例
         if len(ax.get_legend_handles_labels()[1]) >= 2 and not legends:
             issues.append("D4 多序列缺图例")
@@ -277,8 +422,8 @@ _pts, _labs = [], []
 for _msk in (up, dn):
     for _i, _r in d[_msk].nlargest(3, "-log10P").iterrows():
         _pts.append((_r["log2FC"], _r["-log10P"])); _labs.append(str(_r["symbol"]))
-legend_outside(ax, ncol=1)       # 先放图例：图例占右侧空间会触发重新布局，
-_place_labels(ax, _pts, _labs)   # 标签避让必须基于**最终**几何（否则被挤压后重叠）
+_avoid = legend_in(ax, ncol=1)   # 图例先在轴内择位（不占版心外空间）
+_place_labels(ax, _pts, _labs, avoid=_avoid)   # 标签再避让（含图例框）
 _audit_issues += save(fig, "01_deg_volcano")
 
 # ---------- 图2 富集点图（enrichment） ----------
@@ -313,15 +458,13 @@ try:
     # 双图例：右上=方向（颜色），右下=基因数（气泡大小）——均在坐标轴外，不压数据
     from matplotlib.lines import Line2D
     _h, _l = ax.get_legend_handles_labels()
-    fig.legend(_h, _l, frameon=False, loc="outside right upper", handlelength=1.1,
-               handletextpad=0.5, labelspacing=0.5)
+    _a1 = legend_in(ax, _h, _l, ncol=1, prefer="upper right")   # 方向图例（轴内）
     _ref = sorted({int(sel["n_gene"].min()), int(sel["n_gene"].median()),
                    int(sel["n_gene"].max())})
     _sh = [Line2D([], [], marker="o", ls="", mfc="none", mec="0.35",
                   ms=float(np.sqrt(10 + (v - _nmin) * 2.2)), label=str(v)) for v in _ref]
-    fig.legend(handles=_sh, frameon=False, loc="outside right lower", title="Gene count",
-               title_fontsize=FS_SMALL, fontsize=FS_SMALL, handletextpad=0.9,
-               labelspacing=0.9, borderpad=0.2)
+    legend_in(ax, _sh, [str(v) for v in _ref], ncol=1, title="Gene count",
+              prefer="lower left", avoid=_a1, keep=True)        # 大小图例（避开前者）
     _audit_issues += save(fig, "02_enrichment_dotplot")
 except Exception as ex:
     print("图2 跳过:", ex)
@@ -342,6 +485,12 @@ def km(t, e):
         se = surv * np.sqrt(cum_h)
         out_t.append(tt); out_s.append(surv)
         out_lo.append(max(surv - 1.96 * se, 0)); out_hi.append(min(surv + 1.96 * se, 1))
+    # 曲线须延伸至该组**末次随访**（最大观察时间）：否则当末次观察为删失时曲线会
+    # 提前在最后事件处截断，与下方风险人数表(number at risk)自相矛盾，亦不符 SCI KM 惯例。
+    tmax = float(t.max())
+    if tmax > out_t[-1]:
+        out_t.append(tmax); out_s.append(out_s[-1])
+        out_lo.append(out_lo[-1]); out_hi.append(out_hi[-1])
     return np.array(out_t), np.array(out_s), np.array(out_lo), np.array(out_hi)
 
 
@@ -358,12 +507,17 @@ for grp, c, lab in [(hi, VERM, f"High risk (n = {len(hi)}, events = {int(hi.even
     T, S, L, H = km(grp["rfs_days"], grp["event"])
     ax.step(T, S, where="post", c=c, lw=LW, label=lab)
     ax.fill_between(T, L, H, step="post", alpha=0.15, color=c, linewidth=0)
+    # 删失标记(censor marks)：在删失时点画短竖线，置于当时生存估计处（SCI KM 常规）。
+    tc = np.sort(grp["rfs_days"].to_numpy()[grp["event"].to_numpy() == 0])
+    for _tt in tc:
+        _s = float(S[T <= _tt][-1]) if np.any(T <= _tt) else 1.0
+        ax.plot([_tt, _tt], [_s - 0.025, _s + 0.025], c=c, lw=LW, solid_capstyle="butt")
 ax.text(0.98, 0.04, f"Log-rank P = {p_km:.1e}\nHR = {cox['HR']:.3f}"
         f" (95% CI {cox['CI95'][0]:.3f}\u2013{cox['CI95'][1]:.3f})",
         transform=ax.transAxes, ha="right", va="bottom", fontsize=FS_SMALL)
 ax.set_ylabel("Relapse-free survival")
 ax.set_xlim(left=0); ax.set_ylim(0, 1.02)
-legend_outside(ax, ncol=1)
+legend_in(ax, ncol=1, prefer="lower left")
 # 风险人数表：与横轴共享数据坐标。组名**单独成行**（原与首个数字同行 → D8 重叠），
 # 端点数字左/右对齐（居中会越出框 → D7）。
 tmax = int(k["rfs_days"].max()); rt = [0, tmax // 3, 2 * tmax // 3, tmax]
@@ -392,7 +546,7 @@ ax.plot(fpr1, tpr1, c=VERM, lw=LW, label=f"Risk score (AUC = {a1:.3f})")
 ax.plot([0, 1], [0, 1], c=GREY, lw=LW_REF, ls=":")
 ax.set_xlabel("1 - specificity"); ax.set_ylabel("Sensitivity")
 ax.set_xlim(-0.02, 1.02); ax.set_ylim(-0.02, 1.02)
-legend_outside(ax, ncol=1)
+legend_in(ax, ncol=1, prefer="lower right")
 _audit_issues += save(fig, "04_performance_roc_cv")
 
 # ---------- 图5 校准曲线（performance，补充材料） ----------
@@ -406,7 +560,7 @@ if os.path.exists(cal_p):
     ax.set_xlabel("Predicted probability (out-of-fold)")
     ax.set_ylabel("Observed relapse rate")
     ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-    legend_outside(ax, ncol=1)
+    legend_in(ax, ncol=1, prefer="upper left")
     _audit_issues += save(fig, "05_performance_calibration_curve")
 else:
     print("图5 跳过：缺 T13b_校准分位.csv")
@@ -420,7 +574,7 @@ if os.path.exists(dca_p):
     ax.plot(dc["threshold"], dc["NB_all"], c=BLUE, lw=LW, ls="--", label="Treat all")
     ax.plot(dc["threshold"], dc["NB_model"], c=VERM, lw=LW, label="Risk score")
     ax.set_xlabel("Threshold probability"); ax.set_ylabel("Net benefit")
-    legend_outside(ax, ncol=3)
+    legend_in(ax, ncol=1, prefer="lower right")
     _audit_issues += save(fig, "06_dca_net_benefit")
 else:
     print("图6 跳过：缺 T13c_DCA曲线.csv")
